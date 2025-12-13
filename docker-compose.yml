@@ -1,6 +1,6 @@
 services:
   backend:
-    build: .
+    image: ghcr.io/saavuori/e-display:latest
     container_name: hsl-backend
     restart: unless-stopped
     ports:
@@ -8,22 +8,19 @@ services:
     volumes:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
-    environment:
-      - HSL_API_KEY=${HSL_API_KEY}
 
   frontend:
+    image: ghcr.io/saavuori/e-display-frontend:latest
     build: ./web-ui
     container_name: hsl-frontend
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
-      # Ensure this points to the backend address accessible from the browser
-      # If accessing locally on Pi, allow overriding via .env
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
 
   display:
-    build: .
+    image: ghcr.io/saavuori/e-display:latest
     container_name: hsl-display
     restart: unless-stopped
     # Privileged mode is often required for direct hardware access on Pi
@@ -35,6 +32,4 @@ services:
     volumes:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
-    environment:
-      - HSL_API_KEY=${HSL_API_KEY}
     command: python display.py
