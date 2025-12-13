@@ -34,7 +34,7 @@ sys.path.append('lib')
 PREVIEW_MODE = False
 try:
     from waveshare_epd import epd7in5b_V2
-except (ImportError, OSError) as e:
+except (ImportError, OSError, RuntimeError) as e:
     print(f"Hardware driver not available ({e}), using mock display for preview")
     from waveshare_epd import epd_mock as epd7in5b_V2
     PREVIEW_MODE = True
