@@ -1,0 +1,10 @@
+fastapi==0.109.2
+uvicorn==0.27.1
+requests==2.31.0
+Pillow==10.2.0
+pydantic==2.6.1
+python-multipart==0.0.9
+
+# Hardware dependencies (will install on Pi, may fail on Windows)
+RPi.GPIO==0.7.1
+spidev==3.6

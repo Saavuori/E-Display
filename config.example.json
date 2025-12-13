@@ -1,0 +1,71 @@
+{
+    "hsl_api_url": "https://api.digitransit.fi/routing/v2/hsl/gtfs/v1",
+    "hsl_api_key": "",
+    "stops": [
+        {
+            "id": "HSL:1203420",
+            "name": "V\u00e4limerenkatu",
+            "routes": [
+                {
+                    "name": "9H",
+                    "mode": "TRAM"
+                },
+                {
+                    "name": "9",
+                    "mode": "TRAM"
+                },
+                {
+                    "name": "9N",
+                    "mode": "TRAM"
+                }
+            ]
+        },
+        {
+            "id": "HSL:1203406",
+            "name": "Huutokonttori",
+            "routes": [
+                {
+                    "name": "7",
+                    "mode": "TRAM"
+                },
+                {
+                    "name": "1H",
+                    "mode": "TRAM"
+                },
+                {
+                    "name": "7H",
+                    "mode": "TRAM"
+                },
+                {
+                    "name": "1T",
+                    "mode": "TRAM"
+                }
+            ]
+        }
+    ],
+    "refresh_interval_seconds": 300,
+    "display": {
+        "max_items": 5,
+        "show_arrival_minutes_threshold": 10,
+        "hide_arrival_before_minutes": 5
+    },
+    "layout": {
+        "top_line_y": 90,
+        "line_gap": 60,
+        "clock_x": 400,
+        "clock_y": 10,
+        "route_col_x": 40,
+        "route_col_width": 100,
+        "destination_col_x": 100,
+        "time_col_x": 770,
+        "time_col_width": 180,
+        "header_y": 50,
+        "alert_y": 411,
+        "alert_width": 780,
+        "font_clock": 100,
+        "font_numbers": 60,
+        "font_text": 30,
+        "font_header": 30,
+        "font_small": 22
+    }
+}

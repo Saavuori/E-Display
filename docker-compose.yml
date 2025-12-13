@@ -1,0 +1,40 @@
+services:
+  backend:
+    build: .
+    container_name: hsl-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./pic:/app/pic
+    environment:
+      - HSL_API_KEY=${HSL_API_KEY}
+
+  frontend:
+    build: ./web-ui
+    container_name: hsl-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Ensure this points to the backend address accessible from the browser
+      # If accessing locally on Pi, allow overriding via .env
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+
+  display:
+    build: .
+    container_name: hsl-display
+    restart: unless-stopped
+    # Privileged mode is often required for direct hardware access on Pi
+    privileged: true
+    devices:
+      - /dev/gpiomem:/dev/gpiomem
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/spidev0.1:/dev/spidev0.1
+    volumes:
+      - ./config.json:/app/config.json
+      - ./pic:/app/pic
+    environment:
+      - HSL_API_KEY=${HSL_API_KEY}
+    command: python display.py
