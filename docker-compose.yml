@@ -9,6 +9,8 @@ services:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
       - ./refresh_trigger:/app/refresh_trigger
+    labels:
+      - "com.centurylinklabs.watchtower.scope=e-display"
 
   frontend:
     image: ghcr.io/saavuori/e-display/web-ui:latest
@@ -18,12 +20,13 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    labels:
+      - "com.centurylinklabs.watchtower.scope=e-display"
 
   display:
     image: ghcr.io/saavuori/e-display/backend:latest
     container_name: hsl-display
     restart: unless-stopped
-    # Privileged mode is often required for direct hardware access on Pi
     privileged: true
     devices:
       - /dev/gpiomem:/dev/gpiomem
@@ -34,3 +37,24 @@ services:
       - ./pic:/app/pic
       - ./refresh_trigger:/app/refresh_trigger
     command: python display.py
+    labels:
+      - "com.centurylinklabs.watchtower.scope=e-display"
+
+  # Auto-update containers when new images are pushed to GHCR
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Check for updates every 5 minutes (300 seconds)
+      - WATCHTOWER_POLL_INTERVAL=300
+      # Only update containers with matching scope label
+      - WATCHTOWER_SCOPE=e-display
+      # Clean up old images after update
+      - WATCHTOWER_CLEANUP=true
+      # Log level
+      - WATCHTOWER_LOG_LEVEL=info
+    labels:
+      - "com.centurylinklabs.watchtower.scope=e-display"
