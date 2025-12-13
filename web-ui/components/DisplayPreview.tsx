@@ -72,13 +72,14 @@ export default function DisplayPreview({ apiBase }: DisplayPreviewProps) {
                 </div>
 
                 {/* Screen content */}
-                <div className="relative rounded-xl overflow-hidden bg-white shadow-inner">
+                <div className="relative rounded-xl overflow-hidden bg-white shadow-inner aspect-[5/3]">
                     {imageData && (
-                        <img
+                        <Image
                             src={imageData}
                             alt="E-Paper Display Preview"
-                            className="w-full h-auto"
-                            style={{ imageRendering: "auto" }}
+                            fill
+                            className="object-contain"
+                            unoptimized
                         />
                     )}
                 </div>

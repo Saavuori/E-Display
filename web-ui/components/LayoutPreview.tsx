@@ -79,7 +79,7 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
     const measure = (text: string, size: number) => Math.max(size, text.length * size * 0.6); // 0.6 aspect ratio approx
 
     // Standard widths for different content types (approximate character widths)
-    const CLOCK_WIDTH = 150;      // "12:34" at font 100
+    // Standard widths for different content types (approximate character widths)
     // ROUTE_WIDTH and TIME_WIDTH are now in layout config
 
     // Get alerts from data if available
