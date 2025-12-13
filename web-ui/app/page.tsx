@@ -1,5 +1,7 @@
 import Dashboard from '@/components/Dashboard';
 
+export const dynamic = 'force-dynamic';
+
 // This is a Server Component by default
 export default function Page() {
   // Read environment variable at runtime (server-side)
