@@ -5,8 +5,10 @@ export const dynamic = 'force-dynamic';
 // This is a Server Component by default
 export default function Page() {
   // Read environment variable at runtime (server-side)
-  // Ensure we use the non-public variable name if needed, or rely on NEXT_PUBLIC being available in node process
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  // We use array notation to prevent Next.js/Webpack from inlining this at build time
+  const apiBase = process.env['NEXT_PUBLIC_API_URL'] || "http://localhost:8000";
+
+  console.log("Server Rendering Dashboard. API Base:", apiBase);
 
   return <Dashboard apiBase={apiBase} />;
 }
