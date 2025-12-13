@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 # Import from config module
 from config import (
-    PIC_DIR, FONT_DIR, 
+    PIC_DIR, FONT_DIR, REFRESH_TRIGGER_FILE,
     load_config, save_config, Config as ConfigData,
     Fonts, StopConfig, DisplaySettings, LayoutConfig
 )
@@ -185,9 +185,24 @@ async def get_preview_base64():
 
 @app.post("/api/refresh")
 async def refresh_display():
-    """Trigger a display refresh."""
+    """Trigger a display refresh (both preview and physical screen)."""
+    # Generate preview
     generate_preview()
-    return {"status": "ok", "message": "Display refreshed"}
+    
+    # Create trigger file to signal display.py to refresh the physical screen
+    try:
+        with open(REFRESH_TRIGGER_FILE, 'w') as f:
+            f.write('refresh')
+        physical_triggered = True
+    except Exception as e:
+        print(f"Could not create trigger file: {e}")
+        physical_triggered = False
+    
+    return {
+        "status": "ok", 
+        "message": "Display refreshed",
+        "physical_display_triggered": physical_triggered
+    }
 
 @app.get("/api/health")
 async def health_check():

@@ -23,6 +23,7 @@ from config import (
     DISPLAY_WIDTH, DISPLAY_HEIGHT, TOP_LINE_Y, LINE_GAP,
     COLOR_BLACK, COLOR_WHITE, COLOR_GREY,
     ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
+    REFRESH_TRIGGER_FILE,
     Fonts, load_config, Config, LayoutConfig
 )
 
@@ -416,7 +417,18 @@ class BusScheduleDisplay:
             if datetime.now().hour == SCREEN_CLEAR_HOUR:
                 self.renderer.clear_screen()
             
-            time.sleep(REFRESH_INTERVAL_SECONDS)
+            # Wait for next refresh, but check for manual trigger every second
+            refresh_interval = self.config.refresh_interval_seconds
+            for _ in range(refresh_interval):
+                # Check for manual refresh trigger from web UI
+                if os.path.exists(REFRESH_TRIGGER_FILE):
+                    print("Manual refresh triggered from web UI")
+                    try:
+                        os.remove(REFRESH_TRIGGER_FILE)
+                    except OSError:
+                        pass
+                    break  # Exit sleep loop to refresh immediately
+                time.sleep(1)
     
     def _update_display(self):
         """Fetch data and update the display."""

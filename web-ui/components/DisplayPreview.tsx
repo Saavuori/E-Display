@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Image from "next/image";
 
 interface DisplayPreviewProps {
@@ -10,29 +10,50 @@ interface DisplayPreviewProps {
 export default function DisplayPreview({ apiBase }: DisplayPreviewProps) {
     const [imageData, setImageData] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-    useEffect(() => {
-        const fetchPreview = async () => {
-            setLoading(true);
-            try {
-                const res = await fetch(`${apiBase}/api/preview/base64`);
-                if (!res.ok) throw new Error("Failed to fetch preview");
-                const data = await res.json();
-                setImageData(data.image);
-                setLastUpdated(new Date());
-                setError(null);
-            } catch (err) {
-                setError("Could not load preview. Make sure the backend is running.");
-                console.error(err);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchPreview();
+    const fetchPreview = useCallback(async () => {
+        try {
+            const res = await fetch(`${apiBase}/api/preview/base64`);
+            if (!res.ok) throw new Error("Failed to fetch preview");
+            const data = await res.json();
+            setImageData(data.image);
+            setLastUpdated(new Date());
+            setError(null);
+        } catch (err) {
+            setError("Could not load preview. Make sure the backend is running.");
+            console.error(err);
+        }
     }, [apiBase]);
+
+    useEffect(() => {
+        const loadPreview = async () => {
+            setLoading(true);
+            await fetchPreview();
+            setLoading(false);
+        };
+        loadPreview();
+    }, [fetchPreview]);
+
+    const handleForceRefresh = async () => {
+        setRefreshing(true);
+        try {
+            const res = await fetch(`${apiBase}/api/refresh`, { method: 'POST' });
+            const data = await res.json();
+            if (data.physical_display_triggered) {
+                console.log("Physical display refresh triggered");
+            }
+            // Fetch the updated preview
+            await fetchPreview();
+        } catch (err) {
+            console.error("Failed to trigger refresh:", err);
+            setError("Failed to trigger display refresh");
+        } finally {
+            setRefreshing(false);
+        }
+    };
 
     if (loading) {
         return (
@@ -85,17 +106,34 @@ export default function DisplayPreview({ apiBase }: DisplayPreviewProps) {
                 </div>
             </div>
 
-            {/* Status bar */}
+            {/* Status bar with refresh button */}
             <div className="mt-4 flex items-center justify-between text-sm text-zinc-500">
                 <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
                     <span>Preview Active</span>
                 </div>
-                {lastUpdated && (
-                    <span>
-                        Last updated: {lastUpdated.toLocaleTimeString()}
-                    </span>
-                )}
+                <div className="flex items-center gap-4">
+                    {lastUpdated && (
+                        <span>
+                            Last updated: {lastUpdated.toLocaleTimeString()}
+                        </span>
+                    )}
+                    <button
+                        onClick={handleForceRefresh}
+                        disabled={refreshing}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-wait text-white text-sm font-medium rounded-lg transition-colors"
+                    >
+                        <svg
+                            className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        {refreshing ? 'Refreshing...' : 'Force Refresh'}
+                    </button>
+                </div>
             </div>
 
             {/* Display specs */}
@@ -116,3 +154,4 @@ export default function DisplayPreview({ apiBase }: DisplayPreviewProps) {
         </div>
     );
 }
+

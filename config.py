@@ -19,6 +19,7 @@ PIC_DIR = os.path.join(BASE_DIR, 'pic')
 ICON_DIR = os.path.join(PIC_DIR, 'icon')
 FONT_DIR = os.path.join(BASE_DIR, 'font')
 CONFIG_FILE = os.path.join(BASE_DIR, 'config.json')
+REFRESH_TRIGGER_FILE = os.path.join(BASE_DIR, 'refresh_trigger')
 
 # Layout constants (fixed based on display hardware)
 DISPLAY_WIDTH = 800
