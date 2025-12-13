@@ -308,6 +308,45 @@ class DisplayRenderer:
         draw.text((self.layout.route_col_x, self.layout.header_y), "Linja", font=self.fonts.header, fill=COLOR_BLACK, anchor="la")
         draw.text((self.layout.destination_col_x, self.layout.header_y), "Määränpää", font=self.fonts.header, fill=COLOR_BLACK, anchor="la")
         draw.text((self.layout.time_col_x, self.layout.header_y), "Aika/min", font=self.fonts.header, fill=COLOR_BLACK, anchor="ra")
+
+    def _draw_arrivals(self, draw: ImageDraw, arrivals: list[BusArrival]):
+        """Draw the list of bus arrivals."""
+        current_seconds = HSLClient._seconds_since_midnight()
+        
+        for i, bus in enumerate(arrivals[:self.max_items]):
+            # Start below the top line
+            # Items are spaced by line_gap
+            # We add a small padding (e.g. 5px) from the line? 
+            # layout.top_line_y is the Y of the line ABOVE the first item.
+            # So item 0 is at top_line_y + padding?
+            # Looking at `_draw_grid_lines`:
+            # top line is at top_line_y
+            # next line is top_line_y + line_gap
+            # So the space is between top_line_y and top_line_y + line_gap
+            # Text should be vertically centered or aligned nicely.
+            
+            # Let's align text baseline.
+            # If line_gap is 60.
+            # Font numbers is 60. That fills the gap tightly.
+            
+            y_pos = self.layout.top_line_y + (i * self.layout.line_gap)
+            
+            # Route number
+            draw.text((self.layout.route_col_x, y_pos), bus.route, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="la")
+            
+            # Destination (smaller font, maybe offset Y slightly to center?)
+            # Font text is 30.
+            # 60 (gap) - 30 (font) = 30. / 2 = 15 offset?
+            draw.text((self.layout.destination_col_x, y_pos + 15), bus.headsign, font=self.fonts.text, fill=COLOR_BLACK, anchor="la")
+            
+            # Time
+            minutes = bus.minutes_until_arrival(current_seconds)
+            if minutes < self.show_minutes_threshold:
+                time_text = str(int(minutes))
+            else:
+                time_text = bus.formatted_time()
+                
+            draw.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
     
     def _draw_alerts(self, draw: ImageDraw, alerts: list[Alert]):
         """Draw transit alerts if any."""
