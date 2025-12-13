@@ -50,6 +50,12 @@ class BusArrival:
     route: str
     headsign: str
     arrival_seconds: int  # Seconds since midnight
+    delay: int = 0  # Delay in seconds
+    
+    @property
+    def is_late(self) -> bool:
+        """Check if bus is late (delay > 60 seconds)."""
+        return self.delay > 60
     
     def minutes_until_arrival(self, current_seconds: int) -> float:
         """Calculate minutes until this bus arrives."""
@@ -177,7 +183,8 @@ class HSLClient:
             return BusArrival(
                 route=bus_data["trip"]["route"]["shortName"],
                 headsign=bus_data["headsign"],
-                arrival_seconds=realtime_arrival
+                arrival_seconds=realtime_arrival,
+                delay=bus_data.get("arrivalDelay", 0)
             )
         except (KeyError, TypeError) as e:
             print(f"Error extracting arrival: {e}")
@@ -224,7 +231,7 @@ class DisplayRenderer:
         self._draw_grid_lines(draw_red)
         self._draw_clock(draw_bw)
         self._draw_headers(draw_bw)
-        self._draw_arrivals(draw_bw, arrivals)
+        self._draw_arrivals(draw_bw, draw_red, arrivals)
         self._draw_alerts(draw_bw, alerts)
         
         # Save output images
@@ -310,7 +317,7 @@ class DisplayRenderer:
         draw.text((self.layout.destination_col_x, self.layout.header_y), "Määränpää", font=self.fonts.header, fill=COLOR_BLACK, anchor="la")
         draw.text((self.layout.time_col_x, self.layout.header_y), "Aika/min", font=self.fonts.header, fill=COLOR_BLACK, anchor="ra")
 
-    def _draw_arrivals(self, draw: ImageDraw, arrivals: list[BusArrival]):
+    def _draw_arrivals(self, draw_bw: ImageDraw, draw_red: ImageDraw, arrivals: list[BusArrival]):
         """Draw the list of bus arrivals."""
         current_seconds = HSLClient._seconds_since_midnight()
         
@@ -332,13 +339,14 @@ class DisplayRenderer:
             
             y_pos = self.layout.top_line_y + (i * self.layout.line_gap)
             
+            
             # Route number
-            draw.text((self.layout.route_col_x, y_pos), bus.route, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="la")
+            draw_bw.text((self.layout.route_col_x, y_pos), bus.route, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="la")
             
             # Destination (smaller font, maybe offset Y slightly to center?)
             # Font text is 30.
             # 60 (gap) - 30 (font) = 30. / 2 = 15 offset?
-            draw.text((self.layout.destination_col_x, y_pos + 15), bus.headsign, font=self.fonts.text, fill=COLOR_BLACK, anchor="la")
+            draw_bw.text((self.layout.destination_col_x, y_pos + 15), bus.headsign, font=self.fonts.text, fill=COLOR_BLACK, anchor="la")
             
             # Time
             minutes = bus.minutes_until_arrival(current_seconds)
@@ -347,7 +355,11 @@ class DisplayRenderer:
             else:
                 time_text = bus.formatted_time()
                 
-            draw.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
+            # Draw time in red if late, otherwise black
+            if bus.is_late:
+                draw_red.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
+            else:
+                draw_bw.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
     
     def _draw_alerts(self, draw: ImageDraw, alerts: list[Alert]):
         """Draw transit alerts if any."""
