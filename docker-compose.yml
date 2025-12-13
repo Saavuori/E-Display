@@ -8,7 +8,7 @@ services:
     volumes:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
-      - ./refresh_trigger:/app/refresh_trigger
+      - ./triggers:/app/triggers
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
 
@@ -33,7 +33,7 @@ services:
     volumes:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
-      - ./refresh_trigger:/app/refresh_trigger
+      - ./triggers:/app/triggers
     command: python display.py
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 # Import from config module
 from config import (
-    PIC_DIR, FONT_DIR, REFRESH_TRIGGER_FILE,
+    PIC_DIR, FONT_DIR, REFRESH_TRIGGER_FILE, TRIGGER_DIR,
     load_config, save_config, Config as ConfigData,
     Fonts, StopConfig, DisplaySettings, LayoutConfig
 )
@@ -191,6 +191,9 @@ async def refresh_display():
     
     # Create trigger file to signal display.py to refresh the physical screen
     try:
+        if not os.path.exists(TRIGGER_DIR):
+            os.makedirs(TRIGGER_DIR, exist_ok=True)
+            
         with open(REFRESH_TRIGGER_FILE, 'w') as f:
             f.write('refresh')
         physical_triggered = True
