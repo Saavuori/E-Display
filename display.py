@@ -477,17 +477,16 @@ class BusScheduleDisplay:
     
     def _update_display(self):
         """Fetch data and update the display."""
-        # Retry loop for connection errors
-        while True:
-            try:
-                print('Attempting to connect to HSL API.')
-                stop_ids = [s.id for s in self.config.stops]
-                responses = self.hsl_client.fetch_stop_data(stop_ids)
-                print('Connection to API successful.')
-                break
-            except requests.RequestException as e:
-                print(f'Connection error: {e}')
-                self._handle_error("CONNECTION")
+        # Attempt to connect to HSL API
+        try:
+            print('Attempting to connect to HSL API.', flush=True)
+            stop_ids = [s.id for s in self.config.stops]
+            responses = self.hsl_client.fetch_stop_data(stop_ids)
+            print('Connection to API successful.', flush=True)
+        except requests.RequestException as e:
+            print(f'Connection error: {e}', flush=True)
+            self._handle_error("CONNECTION")
+            return
         
         # Parse the data
         min_seconds = self.config.display.hide_arrival_before_minutes * 60
