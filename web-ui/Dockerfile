@@ -2,7 +2,7 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 # Stage 2: Builder
 FROM node:20-alpine AS builder
@@ -13,7 +13,9 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 # Set standalone output via env as backup
 ENV NEXT_OUTPUT=standalone
-RUN npm run build
+RUN --mount=type=cache,target=/.npm \
+    --mount=type=cache,target=/app/.next/cache \
+    npm run build
 
 # Stage 3: Runner
 FROM node:20-alpine AS runner
