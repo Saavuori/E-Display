@@ -4,6 +4,10 @@ FROM python:3.11-slim-bookworm
 # Set working directory
 WORKDIR /app
 
+# Ensure Python output is sent straight to terminal (e.g. your container log)
+# without being first buffered and that you can see the output of your application (e.g. django logs) in real time.
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies required for Pillow and hardware access
 RUN apt-get update && apt-get install -y \
     gcc \

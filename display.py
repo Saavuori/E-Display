@@ -451,17 +451,17 @@ class BusScheduleDisplay:
             
             # Wait for next refresh, but check for manual trigger every second
             refresh_interval = self.config.refresh_interval_seconds
-            print(f"Sleeping for {refresh_interval} seconds...")
+            print(f"Sleeping for {refresh_interval} seconds...", flush=True)
             
             for i in range(refresh_interval):
                 # Check for manual refresh trigger from web UI
                 if os.path.exists(REFRESH_TRIGGER_FILE):
-                    print("Manual refresh triggered from web UI")
+                    print("Manual refresh triggered from web UI", flush=True)
                     try:
                         os.remove(REFRESH_TRIGGER_FILE)
                         break  # Only break if we successfully removed the file OR decided to proceed
                     except OSError as e:
-                        print(f"ERROR: Could not remove trigger file: {e}")
+                        print(f"ERROR: Could not remove trigger file: {e}", flush=True)
                         # If we can't remove it, we shouldn't infinitely loop. 
                         # We'll ignore the trigger this time and continue sleeping to prevent rapid cycling.
                         # OR we break, but then it will trigger again immediately.
@@ -473,7 +473,7 @@ class BusScheduleDisplay:
                 
                 # Optional: print countdown every minute
                 if (refresh_interval - i) % 60 == 0:
-                    print(f"Time to next refresh: {refresh_interval - i}s")
+                    print(f"Time to next refresh: {refresh_interval - i}s", flush=True)
     
     def _update_display(self):
         """Fetch data and update the display."""
