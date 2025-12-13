@@ -184,7 +184,7 @@ class Config:
 def load_config() -> Config:
     """Load configuration from config.json."""
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r') as f:
+        with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
             data = json.load(f)
             return Config.from_dict(data)
     
@@ -205,7 +205,7 @@ def load_config() -> Config:
 
 def save_config(config: Config):
     """Save configuration to config.json."""
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
         json.dump(config.to_dict(), f, indent=2)
 
 
