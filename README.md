@@ -16,6 +16,12 @@ The project consists of two main components:
 -   **Alerts**: Displays disruption alerts from HSL.
 -   **Dockerized**: Easy deployment using Docker Compose.
 
+## Screenshots
+
+### E-Ink Display Preview
+![Display Preview](screenshots/preview.png)
+*Real-time departure view generated for the 7.5" E-Ink Display*
+
 ## Hardware Requirements
 
 -   **Raspberry Pi** (Zero W, 3, or 4 recommended).
