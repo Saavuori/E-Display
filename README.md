@@ -22,6 +22,14 @@ The project consists of two main components:
 ![Display Preview](screenshots/preview.png)
 *Real-time departure view generated for the 7.5" E-Ink Display*
 
+### Web Configuration UI
+![Web Dashboard](screenshots/web-ui-dashboard.png)
+*Modern dashboard for managing stops and settings*
+
+### Visual Layout Editor
+![Layout Editor](screenshots/web-ui-layout.png)
+*Drag-and-drop layout editor for customizing the display*
+
 ## Hardware Requirements
 
 -   **Raspberry Pi** (Zero W, 3, or 4 recommended).
