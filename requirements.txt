@@ -4,6 +4,7 @@ requests==2.31.0
 Pillow==10.2.0
 pydantic==2.6.1
 python-multipart==0.0.9
+numpy>=1.24.0
 
 # Hardware dependencies (will install on Pi, may fail on Windows)
 RPi.GPIO==0.7.1
