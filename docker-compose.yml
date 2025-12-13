@@ -56,5 +56,7 @@ services:
       - WATCHTOWER_CLEANUP=true
       # Log level
       - WATCHTOWER_LOG_LEVEL=info
+      # Fix for "client version is too old" on newer Docker daemons
+      - DOCKER_API_VERSION=1.45
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
