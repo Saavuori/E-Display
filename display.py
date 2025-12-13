@@ -413,6 +413,26 @@ class BusScheduleDisplay:
         self.renderer.initialize()
         
         while True:
+            # Reload configuration to pick up changes
+            try:
+                new_config = load_config()
+                self.config = new_config
+                
+                # Update dependent components
+                self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
+                self.renderer.fonts = self.fonts
+                self.renderer.layout = self.config.layout
+                self.renderer.max_items = self.config.display.max_items
+                self.renderer.show_minutes_threshold = self.config.display.show_arrival_minutes_threshold
+                
+                # Update HSL client keys if changed
+                self.hsl_client.api_url = self.config.hsl_api_url
+                self.hsl_client.headers = {"digitransit-subscription-key": self.config.hsl_api_key}
+                
+            except Exception as e:
+                print(f"Error reloading config: {e}")
+
+
             try:
                 self._update_display()
             except Exception as e:
