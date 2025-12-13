@@ -214,9 +214,9 @@ class DisplayRenderer:
     
     def render_schedule(self, arrivals: list[BusArrival], alerts: list[Alert]) -> tuple[str, str]:
         """Render the bus schedule and return paths to output images."""
-        template_path = os.path.join(self.pic_dir, 'template.png')
-        template_bw = Image.open(template_path)
-        template_red = Image.open(template_path)
+        # Create blank white images instead of loading template file
+        template_bw = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
+        template_red = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
         
         draw_bw = ImageDraw.Draw(template_bw)
         draw_red = ImageDraw.Draw(template_red)
