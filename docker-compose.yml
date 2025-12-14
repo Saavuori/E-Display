@@ -9,8 +9,12 @@ services:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
       - ./triggers:/app/triggers
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
+    environment:
+      # - TZ=Europe/Helsinki
 
   frontend:
     image: ghcr.io/saavuori/e-display/web-ui:latest
@@ -20,6 +24,11 @@ services:
       - "3000:3000"
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    environment:
+      # - TZ=Europe/Helsinki
 
   display:
     image: ghcr.io/saavuori/e-display/backend:latest
@@ -34,11 +43,15 @@ services:
       - ./config.json:/app/config.json
       - ./pic:/app/pic
       - ./triggers:/app/triggers
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     command: python display.py
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
+    environment:
+      # - TZ=Europe/Helsinki
 
-  # Auto-update containers when new images are pushed to GHCR
+      # Auto-update containers when new images are pushed to GHCR
   watchtower:
     image: containrrr/watchtower
     container_name: watchtower
