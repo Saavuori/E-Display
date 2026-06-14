@@ -55,6 +55,12 @@ interface WeatherStatus {
     location: string | null;
 }
 
+interface VersionInfo {
+    version: string;
+    build_date: string;
+    git_sha: string;
+}
+
 interface DashboardProps {
     apiBase: string;
 }
@@ -67,6 +73,7 @@ export default function Dashboard({ apiBase }: DashboardProps) {
     const [previewKey, setPreviewKey] = useState(0);
     const [weather, setWeather] = useState<WeatherStatus | null>(null);
     const [weatherLoading, setWeatherLoading] = useState(false);
+    const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
 
     const fetchConfig = useCallback(async () => {
         try {
@@ -98,10 +105,20 @@ export default function Dashboard({ apiBase }: DashboardProps) {
         }
     }, [apiBase]);
 
+    const fetchVersion = useCallback(async () => {
+        try {
+            const res = await fetch(`${apiBase}/api/version`);
+            if (res.ok) setVersionInfo(await res.json());
+        } catch {
+            // Non-critical — silently ignore
+        }
+    }, [apiBase]);
+
     useEffect(() => {
         fetchConfig();
         fetchWeather();
-    }, [fetchConfig, fetchWeather]);
+        fetchVersion();
+    }, [fetchConfig, fetchWeather, fetchVersion]);
 
     const handleSave = async (newConfig: Config) => {
         setSaving(true);
@@ -260,6 +277,56 @@ export default function Dashboard({ apiBase }: DashboardProps) {
             >
                 <LayoutEditor apiBase={apiBase} onLayoutSaved={handleLayoutSaved} />
             </CollapsibleSection>
-        </main >
+
+            {/* Version Badge Footer */}
+            {versionInfo && (
+                <footer className="mt-10 pt-4 border-t border-zinc-800 text-center">
+                    <div className="inline-flex items-center gap-2 text-xs text-zinc-600 font-mono">
+                        <span className="text-zinc-500">E-Display</span>
+                        <span className="text-zinc-700">·</span>
+
+                        {versionInfo.version === "dev" ? (
+                            <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs">
+                                dev build
+                            </span>
+                        ) : (
+                            <a
+                                href={`https://github.com/Saavuori/E-Display/releases/tag/${versionInfo.version}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-zinc-400 hover:text-white transition-colors"
+                            >
+                                {versionInfo.version}
+                            </a>
+                        )}
+
+                        {versionInfo.git_sha && (
+                            <>
+                                <span className="text-zinc-700">·</span>
+                                <a
+                                    href={`https://github.com/Saavuori/E-Display/commit/${versionInfo.git_sha}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-zinc-600 hover:text-zinc-400 transition-colors"
+                                >
+                                    {versionInfo.git_sha.slice(0, 7)}
+                                </a>
+                            </>
+                        )}
+
+                        {versionInfo.build_date && (
+                            <>
+                                <span className="text-zinc-700">·</span>
+                                <span>
+                                    built {new Date(versionInfo.build_date).toLocaleDateString("en-GB", {
+                                        day: "numeric", month: "short", year: "numeric"
+                                    })}
+                                </span>
+                            </>
+                        )}
+                    </div>
+                </footer>
+            )}
+        </main>
     );
 }

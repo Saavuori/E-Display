@@ -4,6 +4,14 @@ FROM python:3.11-slim-bookworm
 # Set working directory
 WORKDIR /app
 
+# Version info injected at build time by CI
+ARG VERSION=dev
+ARG BUILD_DATE=""
+ARG GIT_SHA=""
+ENV APP_VERSION=${VERSION}
+ENV APP_BUILD_DATE=${BUILD_DATE}
+ENV APP_GIT_SHA=${GIT_SHA}
+
 # Ensure Python output is sent straight to terminal (e.g. your container log)
 # without being first buffered and that you can see the output of your application (e.g. django logs) in real time.
 ENV PYTHONUNBUFFERED=1

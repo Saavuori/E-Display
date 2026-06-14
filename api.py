@@ -242,6 +242,16 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/version")
+async def get_version():
+    """Return build version information injected at Docker build time."""
+    return {
+        "version":    os.environ.get("APP_VERSION", "dev"),
+        "build_date": os.environ.get("APP_BUILD_DATE", ""),
+        "git_sha":    os.environ.get("APP_GIT_SHA", ""),
+    }
+
+
 @app.get("/api/weather")
 async def get_weather():
     """Get current weather from FMI for the configured location."""
