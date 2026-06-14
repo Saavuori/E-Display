@@ -20,6 +20,8 @@ interface LayoutConfig {
     font_text: number;
     font_header: number;
     font_small: number;
+    weather_x?: number;
+    weather_y?: number;
 }
 
 interface LayoutElement {
@@ -85,6 +87,17 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
     // Get alerts from data if available
     const alertsText = arrivalsData?.alerts?.map(a => a.header).join(" | ") || "Alerts Area";
 
+    const weatherX = layout.weather_x !== undefined ? layout.weather_x : 790;
+    const weatherY = layout.weather_y !== undefined ? layout.weather_y : 15;
+    const tempText = "+12.5°C";
+    const tempWidth = measure(tempText, layout.font_header);
+    const tempHeight = layout.font_header;
+
+    // Anchor is "ra" (right-aligned), so left edge is weatherX - tempWidth
+    const tempLeft = calcX(weatherX, tempWidth, "ra");
+    const iconSize = 46;
+    const iconLeft = weatherX - tempWidth - 10 - iconSize;
+
     const elements: LayoutElement[] = [
         {
             id: "clock",
@@ -99,6 +112,29 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
             font: "clock",
             sample: "12:34",
             fontSize: layout.font_clock
+        },
+        {
+            id: "weather_temp",
+            name: "Weather Temp",
+            type: "text",
+            x: tempLeft,
+            y: weatherY,
+            width: tempWidth,
+            height: tempHeight,
+            anchor: "ra",
+            font: "header",
+            sample: tempText,
+            fontSize: layout.font_header
+        },
+        {
+            id: "weather_icon",
+            name: "Weather Icon",
+            type: "area",
+            x: iconLeft,
+            y: weatherY,
+            width: iconSize,
+            height: iconSize,
+            sample: "☀️"
         },
         {
             id: "header_route",

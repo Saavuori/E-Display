@@ -8,6 +8,8 @@ Data is cached for `cache_minutes` to avoid hammering the FMI API on
 every 5-minute bus refresh cycle.
 """
 
+import json
+import os
 import math
 import re
 import time
@@ -30,7 +32,7 @@ class WeatherData:
     description: str            # Human-readable condition (e.g. "Light Snow")
     symbol_code: int            # Raw FMI WeatherSymbol3 integer (used for icon selection)
     location: str               # FMI place name used for the query
-    fetched_at: float           # time.monotonic() timestamp
+    fetched_at: float           # time.time() timestamp
 
 
 # =============================================================================
@@ -272,6 +274,40 @@ class FMIWeatherClient:
     def __init__(self, cache_minutes: int = 30):
         self._cache_minutes = cache_minutes
         self._cache: dict[str, WeatherData] = {}  # keyed by place name (lower-case)
+        self._cache_file = os.path.join(os.path.dirname(os.path.realpath(__file__)), "weather_cache.json")
+        self._load_cache()
+
+    def _load_cache(self):
+        try:
+            if os.path.exists(self._cache_file):
+                with open(self._cache_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for k, v in data.items():
+                        self._cache[k] = WeatherData(
+                            temperature=v["temperature"],
+                            description=v["description"],
+                            symbol_code=v["symbol_code"],
+                            location=v["location"],
+                            fetched_at=v["fetched_at"]
+                        )
+        except Exception as e:
+            print(f"[weather] Failed to load weather cache: {e}")
+
+    def _save_cache(self):
+        try:
+            data = {}
+            for k, v in self._cache.items():
+                data[k] = {
+                    "temperature": v.temperature,
+                    "description": v.description,
+                    "symbol_code": v.symbol_code,
+                    "location": v.location,
+                    "fetched_at": v.fetched_at
+                }
+            with open(self._cache_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"[weather] Failed to save weather cache: {e}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -294,6 +330,7 @@ class FMIWeatherClient:
             data = self._fetch_from_fmi(place)
             if data:
                 self._cache[key] = data
+                self._save_cache()
             return data
         except Exception as exc:
             print(f"[weather] FMI fetch failed for '{place}': {exc}")
@@ -303,13 +340,14 @@ class FMIWeatherClient:
     def invalidate(self, place: str) -> None:
         """Force the next fetch to go to FMI (e.g. after a config change)."""
         self._cache.pop(place.lower(), None)
+        self._save_cache()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
     def _is_fresh(self, data: WeatherData) -> bool:
-        age_seconds = time.monotonic() - data.fetched_at
+        age_seconds = time.time() - data.fetched_at
         return age_seconds < self._cache_minutes * 60
 
     def _fetch_from_fmi(self, place: str) -> Optional[WeatherData]:
@@ -392,7 +430,7 @@ class FMIWeatherClient:
             description=description,
             symbol_code=symbol_val,
             location=place,
-            fetched_at=time.monotonic(),
+            fetched_at=time.time(),
         )
 
 

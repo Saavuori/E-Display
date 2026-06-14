@@ -21,6 +21,8 @@ interface LayoutConfig {
     font_text: number;
     font_header: number;
     font_small: number;
+    weather_x: number;
+    weather_y: number;
 }
 
 const DEFAULT_LAYOUT: LayoutConfig = {
@@ -41,6 +43,8 @@ const DEFAULT_LAYOUT: LayoutConfig = {
     font_text: 30,
     font_header: 30,
     font_small: 22,
+    weather_x: 790,
+    weather_y: 15,
 };
 
 interface LayoutEditorProps {
@@ -131,13 +135,14 @@ export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorPro
     };
 
     const handleElementDrag = (elementId: string, deltaX: number, deltaY: number) => {
-        // Map element IDs to layout properties
         const mapping: Record<string, { x?: keyof LayoutConfig; y?: keyof LayoutConfig }> = {
             clock: { x: "clock_x", y: "clock_y" },
             header_route: { x: "route_col_x" },
             header_destination: { x: "destination_col_x" },
             header_time: { x: "time_col_x" },
             grid_top: { y: "top_line_y" },
+            weather_temp: { x: "weather_x", y: "weather_y" },
+            weather_icon: { x: "weather_x", y: "weather_y" },
         };
 
         // For row elements, update the column positions
@@ -196,6 +201,11 @@ export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorPro
     const clockSettings: SliderConfig[] = [
         { key: "clock_x", label: "X Position", min: 100, max: 700 },
         { key: "clock_y", label: "Y Position", min: 0, max: 50 },
+    ];
+
+    const weatherSettings: SliderConfig[] = [
+        { key: "weather_x", label: "X Position", min: 100, max: 795 },
+        { key: "weather_y", label: "Y Position", min: 0, max: 150 },
     ];
 
     const columnSettings: SliderConfig[] = [
@@ -293,6 +303,7 @@ export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorPro
                     {renderSliderGroup("📍 Column Positions", columnSettings)}
                 </div>
                 <div>
+                    {renderSliderGroup("🌤️ Weather Position", weatherSettings)}
                     {renderSliderGroup("⚠️ Alert Area", alertSettings)}
                     {renderSliderGroup("🔤 Font Sizes", fontSettings)}
                 </div>

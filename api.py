@@ -78,6 +78,8 @@ class LayoutModel(BaseModel):
     font_text: int = 30
     font_header: int = 30
     font_small: int = 22
+    weather_x: int = 790
+    weather_y: int = 15
 
 class ConfigModel(BaseModel):
     hsl_api_url: str
@@ -458,6 +460,28 @@ async def get_layout_elements():
             "anchor": "mt",
             "font": "clock",
             "sample": "12:34"
+        },
+        {
+            "id": "weather_temp",
+            "name": "Weather Temp",
+            "type": "text",
+            "x": calc_x(layout.weather_x, 120, "ra"),
+            "y": layout.weather_y,
+            "width": 120,
+            "height": 30,
+            "anchor": "ra",
+            "font": "header",
+            "sample": "+12.5°C"
+        },
+        {
+            "id": "weather_icon",
+            "name": "Weather Icon",
+            "type": "area",
+            "x": layout.weather_x - 120 - 10 - 46,
+            "y": layout.weather_y,
+            "width": 46,
+            "height": 46,
+            "sample": "☀️"
         },
         {
             "id": "header_route",

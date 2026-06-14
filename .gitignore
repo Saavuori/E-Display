@@ -12,3 +12,5 @@ build/
 *.egg-info/
 config.json
 refresh_trigger
+weather_cache.json
+triggers/
