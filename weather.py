@@ -8,10 +8,11 @@ Data is cached for `cache_minutes` to avoid hammering the FMI API on
 every 5-minute bus refresh cycle.
 """
 
+import math
 import re
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -27,6 +28,7 @@ class WeatherData:
     """Current weather snapshot."""
     temperature: float          # °C
     description: str            # Human-readable condition (e.g. "Light Snow")
+    symbol_code: int            # Raw FMI WeatherSymbol3 integer (used for icon selection)
     location: str               # FMI place name used for the query
     fetched_at: float           # time.monotonic() timestamp
 
@@ -61,6 +63,190 @@ WEATHER_SYMBOLS: dict[int, str] = {
     91: "Mist",
     92: "Fog",
 }
+
+# Maps FMI symbol code → icon category for PIL drawing
+SYMBOL_CATEGORY: dict[int, str] = {
+    1:  "clear",
+    2:  "clear",
+    4:  "partly_cloudy",
+    6:  "cloudy",
+    7:  "cloudy",
+    21: "light_rain",
+    24: "rain",
+    31: "light_rain",
+    32: "rain",
+    33: "rain",
+    41: "snow",
+    42: "snow",
+    43: "snow",
+    51: "snow",
+    52: "snow",
+    53: "snow",
+    61: "thunder",
+    62: "thunder",
+    71: "fog",
+    72: "fog",
+    73: "fog",
+    81: "sleet",
+    82: "sleet",
+    83: "sleet",
+    91: "fog",
+    92: "fog",
+}
+
+
+# =============================================================================
+# PIL WEATHER ICON DRAWING
+# =============================================================================
+# All icon functions take (draw, x, y, size) where (x,y) is the top-left corner
+# of the size×size bounding box.  They draw using fill=0 (black) onto a PIL
+# 1-bit ImageDraw context (mode '1'), matching the e-paper BW layer.
+
+def _cloud_body(draw, x: int, y: int, size: int) -> None:
+    """Reusable cloud silhouette occupying the upper ~65% of the bounding box."""
+    s = size
+    # Wide bottom body
+    draw.ellipse([x + 1,          y + int(s * .40),
+                  x + s - 1,      y + int(s * .65)], fill=0)
+    # Left bump
+    draw.ellipse([x + 3,          y + int(s * .20),
+                  x + int(s*.50), y + int(s * .52)], fill=0)
+    # Right (taller) bump
+    draw.ellipse([x + int(s*.32), y + int(s * .10),
+                  x + int(s*.88), y + int(s * .48)], fill=0)
+
+
+def _icon_clear(draw, x: int, y: int, size: int) -> None:
+    """Sun: filled circle + 8 radiating lines."""
+    cx, cy = x + size // 2, y + size // 2
+    r = max(4, size // 5)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=0)
+    ri, ro = int(r * 1.55), size // 2 - 2
+    for deg in range(0, 360, 45):
+        rad = math.radians(deg)
+        draw.line([
+            cx + int(ri * math.cos(rad)), cy + int(ri * math.sin(rad)),
+            cx + int(ro * math.cos(rad)), cy + int(ro * math.sin(rad)),
+        ], fill=0, width=2)
+
+
+def _icon_partly_cloudy(draw, x: int, y: int, size: int) -> None:
+    """Small sun top-left + cloud covering lower-right."""
+    sx, sy = x + size // 4, y + size // 4
+    sr = max(3, size // 8)
+    draw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=0)
+    ri, ro = int(sr * 1.5), int(sr * 2.2)
+    for deg in range(0, 360, 60):
+        rad = math.radians(deg)
+        draw.line([
+            sx + int(ri * math.cos(rad)), sy + int(ri * math.sin(rad)),
+            sx + int(ro * math.cos(rad)), sy + int(ro * math.sin(rad)),
+        ], fill=0, width=1)
+    # Cloud shifted down-right so sun stays visible
+    off = size // 5
+    _cloud_body(draw, x + off, y + off, int(size * 0.82))
+
+
+def _icon_cloudy(draw, x: int, y: int, size: int) -> None:
+    """Plain cloud silhouette."""
+    _cloud_body(draw, x, y, size)
+
+
+def _icon_light_rain(draw, x: int, y: int, size: int) -> None:
+    """Cloud + 2 angled rain drops."""
+    _cloud_body(draw, x, y, size)
+    top = y + int(size * .68)
+    bot = top + int(size * .22)
+    for drop_x in [x + int(size * .30), x + int(size * .65)]:
+        draw.line([drop_x, top, drop_x - 2, bot], fill=0, width=2)
+
+
+def _icon_rain(draw, x: int, y: int, size: int) -> None:
+    """Cloud + 4 staggered rain drops."""
+    _cloud_body(draw, x, y, size)
+    top = y + int(size * .67)
+    h = int(size * .20)
+    for i, frac in enumerate([.18, .38, .58, .78]):
+        dy = (i % 2) * int(size * .07)
+        drop_x = x + int(size * frac)
+        draw.line([drop_x, top + dy, drop_x - 2, top + dy + h], fill=0, width=2)
+
+
+def _icon_snow(draw, x: int, y: int, size: int) -> None:
+    """Cloud + 3 snow dots."""
+    _cloud_body(draw, x, y, size)
+    dot_y = y + int(size * .80)
+    dot_r = max(2, size // 14)
+    for frac in [.25, .50, .75]:
+        dot_x = x + int(size * frac)
+        draw.ellipse([dot_x - dot_r, dot_y - dot_r,
+                      dot_x + dot_r, dot_y + dot_r], fill=0)
+
+
+def _icon_sleet(draw, x: int, y: int, size: int) -> None:
+    """Cloud + 1 rain drop + 1 snow dot (mixed precipitation)."""
+    _cloud_body(draw, x, y, size)
+    top = y + int(size * .68)
+    bot = top + int(size * .22)
+    draw.line([x + int(size * .32), top, x + int(size * .30), bot], fill=0, width=2)
+    dot_r = max(2, size // 14)
+    dot_x, dot_y = x + int(size * .65), y + int(size * .80)
+    draw.ellipse([dot_x - dot_r, dot_y - dot_r,
+                  dot_x + dot_r, dot_y + dot_r], fill=0)
+
+
+def _icon_thunder(draw, x: int, y: int, size: int) -> None:
+    """Cloud + filled lightning-bolt polygon."""
+    _cloud_body(draw, x, y, size)
+    by = y + int(size * .67)
+    bx = x + int(size * .52)
+    w = int(size * .22)
+    h = int(size * .30)
+    pts = [
+        (bx + w // 2,     by),
+        (bx - w // 4,     by + h // 2),
+        (bx + w // 4,     by + h // 2),
+        (bx - w // 2,     by + h),
+        (bx + w // 4,     by + int(h * .42)),
+        (bx - w // 4 + 2, by + int(h * .42)),
+    ]
+    draw.polygon(pts, fill=0)
+
+
+def _icon_fog(draw, x: int, y: int, size: int) -> None:
+    """Three horizontal bars of varying width."""
+    bar_h = max(2, size // 12)
+    specs = [(0.12, 0.88), (0.20, 0.80), (0.08, 0.70)]
+    for i, (fs, fe) in enumerate(specs):
+        bar_y = y + int(size * (0.20 + i * 0.27))
+        draw.rectangle([
+            x + int(size * fs), bar_y,
+            x + int(size * fe), bar_y + bar_h,
+        ], fill=0)
+
+
+_ICON_DRAWERS = {
+    "clear":         _icon_clear,
+    "partly_cloudy": _icon_partly_cloudy,
+    "cloudy":        _icon_cloudy,
+    "light_rain":    _icon_light_rain,
+    "rain":          _icon_rain,
+    "snow":          _icon_snow,
+    "sleet":         _icon_sleet,
+    "thunder":       _icon_thunder,
+    "fog":           _icon_fog,
+}
+
+
+def draw_weather_icon(draw, x: int, y: int, size: int, symbol_code: int) -> None:
+    """
+    Draw a weather condition icon at top-left (x, y) in a size×size bounding box.
+
+    *draw* must be a PIL ImageDraw.Draw instance on a 1-bit ('1') image.
+    The icon is drawn in black (fill=0).  Callers own clipping / bounds checks.
+    """
+    category = SYMBOL_CATEGORY.get(symbol_code, "cloudy")
+    _ICON_DRAWERS.get(category, _icon_cloudy)(draw, x, y, size)
 
 
 # =============================================================================
@@ -204,6 +390,7 @@ class FMIWeatherClient:
         return WeatherData(
             temperature=round(temperature, 1),
             description=description,
+            symbol_code=symbol_val,
             location=place,
             fetched_at=time.monotonic(),
         )

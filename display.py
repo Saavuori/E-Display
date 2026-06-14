@@ -29,7 +29,7 @@ from config import (
 )
 
 # Weather client
-from weather import FMIWeatherClient, WeatherData, weather_client
+from weather import FMIWeatherClient, WeatherData, weather_client, draw_weather_icon
 
 # Add lib folder for display driver modules
 sys.path.append('lib')
@@ -235,6 +235,7 @@ class DisplayRenderer:
         self._draw_grid_lines(draw_red)
         self._draw_clock(draw_bw)
         self._draw_temperature(draw_bw, weather)
+        self._draw_weather_icon(draw_bw, weather)
         self._draw_headers(draw_bw)
         self._draw_arrivals(draw_bw, draw_red, arrivals)
         self._draw_alerts(draw_bw, alerts)
@@ -298,7 +299,7 @@ class DisplayRenderer:
         """Draw current temperature right-aligned in the top-right area beside the clock."""
         if weather is None:
             return
-        temp_text = f"{weather.temperature:+.1f}°C"
+        temp_text = f"{weather.temperature:+.1f}\u00b0C"
         draw.text(
             (self.layout.weather_x, self.layout.weather_y),
             temp_text,
@@ -306,6 +307,23 @@ class DisplayRenderer:
             fill=COLOR_BLACK,
             anchor="ra",  # right-aligned baseline
         )
+
+    def _draw_weather_icon(self, draw: ImageDraw, weather: Optional[WeatherData]):
+        """Draw weather condition icon to the left of the temperature text."""
+        if weather is None:
+            return
+        icon_size = 46  # pixels — fits inside the 90px top zone
+        temp_text = f"{weather.temperature:+.1f}\u00b0C"
+        # Measure temperature text width for precise icon placement
+        try:
+            bbox = draw.textbbox((0, 0), temp_text, font=self.fonts.header, anchor="la")
+            text_width = bbox[2] - bbox[0]
+        except Exception:
+            # Fallback estimate: average ~0.65× font size per character
+            text_width = len(temp_text) * int(self.layout.font_header * 0.65)
+        icon_x = self.layout.weather_x - text_width - 10 - icon_size
+        icon_y = self.layout.weather_y
+        draw_weather_icon(draw, icon_x, icon_y, icon_size, weather.symbol_code)
 
     def _draw_grid_lines(self, draw: ImageDraw):
         """Draw the grid lines for the schedule."""
