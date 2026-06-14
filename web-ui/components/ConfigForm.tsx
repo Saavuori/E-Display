@@ -20,12 +20,19 @@ interface DisplaySettings {
     hide_arrival_before_minutes: number;
 }
 
+interface WeatherSettings {
+    enabled: boolean;
+    location: string;
+    cache_minutes: number;
+}
+
 interface Config {
     hsl_api_url: string;
     hsl_api_key: string;
     stops: Stop[];
     refresh_interval_seconds: number;
     display: DisplaySettings;
+    weather?: WeatherSettings;
 }
 
 interface ConfigFormProps {
@@ -71,6 +78,18 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
         setFormData({
             ...formData,
             display: { ...formData.display, [field]: value },
+        });
+    };
+
+    const updateWeather = <K extends keyof WeatherSettings>(field: K, value: WeatherSettings[K]) => {
+        setFormData({
+            ...formData,
+            weather: {
+                enabled: formData.weather?.enabled ?? true,
+                location: formData.weather?.location ?? "Helsinki",
+                cache_minutes: formData.weather?.cache_minutes ?? 30,
+                [field]: value,
+            },
         });
     };
 
@@ -229,6 +248,63 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                                 updateDisplay("hide_arrival_before_minutes", parseInt(e.target.value))
                             }
                             className={inputClass}
+                        />
+                    </div>
+                </div>
+            </section>
+
+            {/* Weather Settings */}
+            <section>
+                <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
+                    🌡 Weather
+                </h3>
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between p-3 bg-zinc-800/50 rounded-lg border border-zinc-700">
+                        <div>
+                            <div className="font-medium text-sm">Show temperature on display</div>
+                            <div className="text-xs text-zinc-500 mt-0.5">Fetched from FMI Open Data — no API key needed</div>
+                        </div>
+                        <button
+                            type="button"
+                            id="weather-enabled-toggle"
+                            onClick={() => updateWeather("enabled", !(formData.weather?.enabled ?? true))}
+                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                                (formData.weather?.enabled ?? true)
+                                    ? "bg-blue-500"
+                                    : "bg-zinc-600"
+                            }`}
+                        >
+                            <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                    (formData.weather?.enabled ?? true) ? "translate-x-6" : "translate-x-1"
+                                }`}
+                            />
+                        </button>
+                    </div>
+                    <div>
+                        <label className={labelClass}>Weather Location</label>
+                        <input
+                            id="weather-location"
+                            type="text"
+                            placeholder="e.g. Helsinki, Espoo, Tampere"
+                            value={formData.weather?.location ?? "Helsinki"}
+                            onChange={(e) => updateWeather("location", e.target.value)}
+                            className={inputClass}
+                            disabled={!(formData.weather?.enabled ?? true)}
+                        />
+                        <p className="text-xs text-zinc-500 mt-1">Finnish city name used for FMI weather data</p>
+                    </div>
+                    <div>
+                        <label className={labelClass}>Cache Duration (minutes)</label>
+                        <input
+                            id="weather-cache-minutes"
+                            type="number"
+                            min="5"
+                            max="120"
+                            value={formData.weather?.cache_minutes ?? 30}
+                            onChange={(e) => updateWeather("cache_minutes", parseInt(e.target.value))}
+                            className={inputClass}
+                            disabled={!(formData.weather?.enabled ?? true)}
                         />
                     </div>
                 </div>

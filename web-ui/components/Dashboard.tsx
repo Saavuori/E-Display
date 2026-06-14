@@ -41,6 +41,18 @@ interface Config {
     refresh_interval_seconds: number;
     display: DisplaySettings;
     layout?: LayoutConfig;
+    weather?: {
+        enabled: boolean;
+        location: string;
+        cache_minutes: number;
+    };
+}
+
+interface WeatherStatus {
+    enabled: boolean;
+    temperature: number | null;
+    description: string | null;
+    location: string | null;
 }
 
 interface DashboardProps {
@@ -53,6 +65,8 @@ export default function Dashboard({ apiBase }: DashboardProps) {
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
     const [previewKey, setPreviewKey] = useState(0);
+    const [weather, setWeather] = useState<WeatherStatus | null>(null);
+    const [weatherLoading, setWeatherLoading] = useState(false);
 
     const fetchConfig = useCallback(async () => {
         try {
@@ -69,9 +83,25 @@ export default function Dashboard({ apiBase }: DashboardProps) {
         }
     }, [apiBase]);
 
+    const fetchWeather = useCallback(async () => {
+        setWeatherLoading(true);
+        try {
+            const res = await fetch(`${apiBase}/api/weather`);
+            if (res.ok) {
+                const data = await res.json();
+                setWeather(data);
+            }
+        } catch {
+            // Weather is non-critical, don't show error
+        } finally {
+            setWeatherLoading(false);
+        }
+    }, [apiBase]);
+
     useEffect(() => {
         fetchConfig();
-    }, [fetchConfig]);
+        fetchWeather();
+    }, [fetchConfig, fetchWeather]);
 
     const handleSave = async (newConfig: Config) => {
         setSaving(true);
@@ -113,12 +143,50 @@ export default function Dashboard({ apiBase }: DashboardProps) {
         <main className="min-h-screen p-8">
             {/* Header */}
             <header className="mb-8">
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-orange-400 bg-clip-text text-transparent">
-                    E-Display Control Panel
-                </h1>
-                <p className="text-zinc-400 mt-2">
-                    Configure and preview your e-paper bus schedule display
-                </p>
+                <div className="flex items-start justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-orange-400 bg-clip-text text-transparent">
+                            E-Display Control Panel
+                        </h1>
+                        <p className="text-zinc-400 mt-2">
+                            Configure and preview your e-paper bus schedule display
+                        </p>
+                    </div>
+                    {/* Weather Status Card */}
+                    {weather?.enabled && (
+                        <div className="flex items-center gap-3 px-5 py-3 bg-zinc-800/80 border border-zinc-700 rounded-xl backdrop-blur-sm">
+                            <div className="text-3xl">
+                                {weatherLoading ? "⏳" : "🌡"}
+                            </div>
+                            <div>
+                                {weatherLoading ? (
+                                    <div className="text-zinc-400 text-sm">Fetching weather…</div>
+                                ) : weather.temperature !== null ? (
+                                    <>
+                                        <div className="text-2xl font-bold text-white">
+                                            {weather.temperature > 0 ? "+" : ""}{weather.temperature?.toFixed(1)}°C
+                                        </div>
+                                        <div className="text-xs text-zinc-400">
+                                            {weather.description} · {weather.location}
+                                        </div>
+                                    </>
+                                ) : (
+                                    <div className="text-zinc-500 text-sm">Weather unavailable</div>
+                                )}
+                            </div>
+                            <button
+                                id="weather-refresh-btn"
+                                onClick={fetchWeather}
+                                title="Refresh weather"
+                                className="ml-2 p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded-lg transition-colors"
+                            >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
+                </div>
             </header>
 
             {/* Debug Info */}

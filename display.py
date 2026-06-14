@@ -28,6 +28,9 @@ from config import (
     Fonts, load_config, Config, LayoutConfig
 )
 
+# Weather client
+from weather import FMIWeatherClient, WeatherData, weather_client
+
 # Add lib folder for display driver modules
 sys.path.append('lib')
 
@@ -220,7 +223,7 @@ class DisplayRenderer:
         self.epd.init()
         self.epd.Clear()
     
-    def render_schedule(self, arrivals: list[BusArrival], alerts: list[Alert]) -> tuple[str, str]:
+    def render_schedule(self, arrivals: list[BusArrival], alerts: list[Alert], weather: Optional[WeatherData] = None) -> tuple[str, str]:
         """Render the bus schedule and return paths to output images."""
         # Create blank white images instead of loading template file
         template_bw = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
@@ -231,6 +234,7 @@ class DisplayRenderer:
         
         self._draw_grid_lines(draw_red)
         self._draw_clock(draw_bw)
+        self._draw_temperature(draw_bw, weather)
         self._draw_headers(draw_bw)
         self._draw_arrivals(draw_bw, draw_red, arrivals)
         self._draw_alerts(draw_bw, alerts)
@@ -290,6 +294,19 @@ class DisplayRenderer:
         self.epd.init()
         self.epd.Clear()
     
+    def _draw_temperature(self, draw: ImageDraw, weather: Optional[WeatherData]):
+        """Draw current temperature right-aligned in the top-right area beside the clock."""
+        if weather is None:
+            return
+        temp_text = f"{weather.temperature:+.1f}°C"
+        draw.text(
+            (self.layout.weather_x, self.layout.weather_y),
+            temp_text,
+            font=self.fonts.header,
+            fill=COLOR_BLACK,
+            anchor="ra",  # right-aligned baseline
+        )
+
     def _draw_grid_lines(self, draw: ImageDraw):
         """Draw the grid lines for the schedule."""
         # Dotted separator lines between items
@@ -408,6 +425,9 @@ class BusScheduleDisplay:
         )
         
         self.hsl_client = HSLClient(self.config.hsl_api_url, self.config.hsl_api_key)
+        
+        # Configure the shared weather client from loaded config
+        weather_client._cache_minutes = self.config.weather.cache_minutes
     
     def run(self):
         """Main application loop."""
@@ -478,6 +498,14 @@ class BusScheduleDisplay:
     
     def _update_display(self):
         """Fetch data and update the display."""
+        # Fetch weather (cached — won't call FMI on every 5-min cycle)
+        current_weather = None
+        if self.config.weather.enabled:
+            try:
+                current_weather = weather_client.fetch_current(self.config.weather.location)
+            except Exception as exc:
+                print(f"Weather fetch failed, continuing without: {exc}")
+
         # Attempt to connect to HSL API
         try:
             print('Attempting to connect to HSL API.', flush=True)
@@ -494,7 +522,7 @@ class BusScheduleDisplay:
         arrivals, alerts = self.hsl_client.parse_arrivals(responses, min_seconds)
         
         # Render and display
-        output_bw, output_red = self.renderer.render_schedule(arrivals, alerts)
+        output_bw, output_red = self.renderer.render_schedule(arrivals, alerts, weather=current_weather)
         self.renderer.write_to_screen(output_bw, output_red)
     
     def _handle_error(self, error_type: str):

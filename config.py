@@ -58,6 +58,14 @@ class DisplaySettings:
 
 
 @dataclass
+class WeatherConfig:
+    """Configuration for the FMI weather overlay."""
+    enabled: bool = True
+    location: str = "Helsinki"   # FMI place name (Finnish cities)
+    cache_minutes: int = 30
+
+
+@dataclass
 class LayoutConfig:
     """Configurable layout parameters for the e-paper display."""
     
@@ -89,6 +97,10 @@ class LayoutConfig:
     font_text: int = 30
     font_header: int = 30
     font_small: int = 22
+
+    # Weather overlay position (top-right of clock area)
+    weather_x: int = 790
+    weather_y: int = 15
     
     def to_dict(self) -> dict:
         """Convert to dictionary for saving."""
@@ -110,6 +122,8 @@ class LayoutConfig:
             'font_text': self.font_text,
             'font_header': self.font_header,
             'font_small': self.font_small,
+            'weather_x': self.weather_x,
+            'weather_y': self.weather_y,
         }
     
     @classmethod
@@ -133,6 +147,8 @@ class LayoutConfig:
             font_text=data.get('font_text', 30),
             font_header=data.get('font_header', 30),
             font_small=data.get('font_small', 22),
+            weather_x=data.get('weather_x', 790),
+            weather_y=data.get('weather_y', 15),
         )
 
 
@@ -144,6 +160,11 @@ class Config:
     refresh_interval_seconds: int
     display: DisplaySettings
     layout: LayoutConfig
+    weather: WeatherConfig = None
+
+    def __post_init__(self):
+        if self.weather is None:
+            self.weather = WeatherConfig()
     
     @classmethod
     def from_dict(cls, data: dict) -> 'Config':
@@ -159,13 +180,20 @@ class Config:
             'hide_arrival_before_minutes': 10
         }))
         layout = LayoutConfig.from_dict(data.get('layout', {}))
+        weather_data = data.get('weather', {})
+        weather = WeatherConfig(
+            enabled=weather_data.get('enabled', True),
+            location=weather_data.get('location', 'Helsinki'),
+            cache_minutes=weather_data.get('cache_minutes', 30),
+        )
         return cls(
             hsl_api_url=data.get('hsl_api_url', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1'),
             hsl_api_key=os.environ.get('HSL_API_KEY') or data.get('hsl_api_key', ''),
             stops=stops,
             refresh_interval_seconds=data.get('refresh_interval_seconds', 300),
             display=display,
-            layout=layout
+            layout=layout,
+            weather=weather,
         )
     
     def to_dict(self) -> dict:
@@ -180,7 +208,12 @@ class Config:
                 'show_arrival_minutes_threshold': self.display.show_arrival_minutes_threshold,
                 'hide_arrival_before_minutes': self.display.hide_arrival_before_minutes
             },
-            'layout': self.layout.to_dict()
+            'layout': self.layout.to_dict(),
+            'weather': {
+                'enabled': self.weather.enabled,
+                'location': self.weather.location,
+                'cache_minutes': self.weather.cache_minutes,
+            },
         }
 
 

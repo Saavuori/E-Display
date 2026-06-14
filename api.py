@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from config import (
     PIC_DIR, FONT_DIR, REFRESH_TRIGGER_FILE, TRIGGER_DIR,
     load_config, save_config, Config as ConfigData,
-    Fonts, StopConfig, DisplaySettings, LayoutConfig
+    Fonts, StopConfig, DisplaySettings, LayoutConfig, WeatherConfig
 )
 
 # Import display engine components
@@ -23,6 +23,7 @@ import sys
 sys.path.append('lib')
 from display import HSLClient, DisplayRenderer, BusArrival, Alert, PREVIEW_MODE
 from waveshare_epd import epd_mock
+from weather import weather_client, WeatherData
 
 app = FastAPI(title="E-Display API", version="1.0.0")
 
@@ -85,6 +86,16 @@ class ConfigModel(BaseModel):
     refresh_interval_seconds: int = 300
     display: DisplayModel = DisplayModel()
     layout: LayoutModel = LayoutModel()
+    weather: 'WeatherModel | None' = None
+
+
+class WeatherModel(BaseModel):
+    enabled: bool = True
+    location: str = "Helsinki"
+    cache_minutes: int = 30
+
+
+ConfigModel.model_rebuild()
 
 
 # =============================================================================
@@ -106,7 +117,16 @@ def generate_preview() -> str:
         show_minutes_threshold=config.display.show_arrival_minutes_threshold
     )
     
-    # Fetch data
+    # Fetch weather (uses shared cache — fast on subsequent calls)
+    current_weather = None
+    if config.weather.enabled:
+        try:
+            weather_client._cache_minutes = config.weather.cache_minutes
+            current_weather = weather_client.fetch_current(config.weather.location)
+        except Exception as exc:
+            print(f"Weather fetch failed in preview: {exc}")
+
+    # Fetch bus data
     hsl_client = HSLClient(config.hsl_api_url, config.hsl_api_key)
     stop_ids = [s.id for s in config.stops]
     
@@ -119,7 +139,7 @@ def generate_preview() -> str:
         arrivals, alerts = [], []
     
     # Render preview
-    output_bw, output_red = renderer.render_schedule(arrivals, alerts)
+    output_bw, output_red = renderer.render_schedule(arrivals, alerts, weather=current_weather)
     renderer.write_to_screen(output_bw, output_red)
     
     return str(PREVIEW_FILE)
@@ -140,6 +160,14 @@ async def update_config(config: ConfigModel):
     """Update configuration."""
     # Convert Pydantic model to dataclass
     layout_data = config.layout.model_dump() if config.layout else {}
+    weather_cfg = WeatherConfig(
+        enabled=config.weather.enabled if config.weather else True,
+        location=config.weather.location if config.weather else "Helsinki",
+        cache_minutes=config.weather.cache_minutes if config.weather else 30,
+    )
+    # Invalidate weather cache if location changed
+    if config.weather:
+        weather_client.invalidate(config.weather.location)
     config_data = ConfigData(
         hsl_api_url=config.hsl_api_url,
         hsl_api_key=config.hsl_api_key,
@@ -154,7 +182,8 @@ async def update_config(config: ConfigModel):
             show_arrival_minutes_threshold=config.display.show_arrival_minutes_threshold,
             hide_arrival_before_minutes=config.display.hide_arrival_before_minutes
         ),
-        layout=LayoutConfig.from_dict(layout_data)
+        layout=LayoutConfig.from_dict(layout_data),
+        weather=weather_cfg,
     )
     save_config(config_data)
     return {"status": "ok", "message": "Configuration saved"}
@@ -211,6 +240,30 @@ async def refresh_display():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/api/weather")
+async def get_weather():
+    """Get current weather from FMI for the configured location."""
+    config = load_config()
+    if not config.weather.enabled:
+        return {"enabled": False, "temperature": None, "description": None, "location": None}
+
+    try:
+        weather_client._cache_minutes = config.weather.cache_minutes
+        data = weather_client.fetch_current(config.weather.location)
+        if data is None:
+            raise HTTPException(status_code=503, detail="Weather data unavailable")
+        return {
+            "enabled": True,
+            "temperature": data.temperature,
+            "description": data.description,
+            "location": data.location,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/arrivals")

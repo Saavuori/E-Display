@@ -66,6 +66,13 @@
         "font_numbers": 60,
         "font_text": 30,
         "font_header": 30,
-        "font_small": 22
+        "font_small": 22,
+        "weather_x": 790,
+        "weather_y": 15
+    },
+    "weather": {
+        "enabled": true,
+        "location": "Helsinki",
+        "cache_minutes": 30
     }
 }
