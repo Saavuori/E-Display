@@ -27,11 +27,13 @@ from weather import weather_client, WeatherData
 
 app = FastAPI(title="E-Display API", version="1.0.0")
 
-# Enable CORS for Next.js frontend
+# Enable CORS for Next.js frontend.
+# The API uses no cookies/credentials, so allow_credentials must be False —
+# browsers reject the wildcard origin when credentials are allowed.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -86,6 +88,7 @@ class ConfigModel(BaseModel):
     hsl_api_key: str
     stops: list[StopModel] = []
     refresh_interval_seconds: int = 300
+    epd_driver: str = "epd7in5b_V2"
     display: DisplayModel = DisplayModel()
     layout: LayoutModel = LayoutModel()
     weather: 'WeatherModel | None' = None
@@ -108,7 +111,6 @@ def generate_preview() -> str:
     """Generate preview image and return path."""
     config = load_config()
     
-    # Initialize components
     # Initialize components
     epd = epd_mock.EPD()
     fonts = Fonts(layout=config.layout)
@@ -179,6 +181,7 @@ async def update_config(config: ConfigModel):
             routes=[{'name': r.name, 'mode': r.mode} for r in s.routes] if s.routes else None
         ) for s in config.stops],
         refresh_interval_seconds=config.refresh_interval_seconds,
+        epd_driver=config.epd_driver,
         display=DisplaySettings(
             max_items=config.display.max_items,
             show_arrival_minutes_threshold=config.display.show_arrival_minutes_threshold,
@@ -335,7 +338,7 @@ async def search_stops(
     # Step 1: Geocode the address to get coordinates
     geocode_url = f"https://api.digitransit.fi/geocoding/v1/search?text={q}&size=1"
     try:
-        geo_response = requests.get(geocode_url, headers=headers)
+        geo_response = requests.get(geocode_url, headers=headers, timeout=15)
         geo_response.raise_for_status()
         geo_data = geo_response.json()
     except requests.RequestException as e:
@@ -379,7 +382,8 @@ async def search_stops(
         stops_response = requests.post(
             graphql_url,
             headers={**headers, "Content-Type": "application/json"},
-            json={"query": query}
+            json={"query": query},
+            timeout=15,
         )
         stops_response.raise_for_status()
         stops_data = stops_response.json()
@@ -540,7 +544,6 @@ async def get_layout_elements():
         {
             "id": "alerts",
             "name": "Alerts Area",
-            "type": "area",
             "type": "area",
             "x": (800 - getattr(layout, 'alert_width', 780)) // 2,
             "y": layout.alert_y,

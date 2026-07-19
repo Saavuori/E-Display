@@ -44,6 +44,7 @@
         }
     ],
     "refresh_interval_seconds": 300,
+    "epd_driver": "epd7in5b_V2",
     "display": {
         "max_items": 5,
         "show_arrival_minutes_threshold": 10,
