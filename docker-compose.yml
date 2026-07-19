@@ -14,6 +14,9 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
     environment:
+      # HSL API key from the .env file (Compose substitutes ${HSL_API_KEY};
+      # defaults to empty so `up` still works when the key lives in config.json).
+      - HSL_API_KEY=${HSL_API_KEY:-}
       # - TZ=Europe/Helsinki
 
   frontend:
@@ -49,6 +52,8 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.scope=e-display"
     environment:
+      # HSL API key from the .env file (see backend service above).
+      - HSL_API_KEY=${HSL_API_KEY:-}
       # - TZ=Europe/Helsinki
 
       # Auto-update containers when new images are pushed to GHCR

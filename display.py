@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import textwrap
+import importlib
 import traceback
 from datetime import datetime
 from dataclasses import dataclass
@@ -23,7 +24,6 @@ from config import (
     DISPLAY_WIDTH, DISPLAY_HEIGHT, TOP_LINE_Y, LINE_GAP,
     COLOR_BLACK, COLOR_WHITE, COLOR_GREY,
     ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
-    ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
     REFRESH_TRIGGER_FILE, TRIGGER_DIR,
     Fonts, load_config, Config, LayoutConfig
 )
@@ -34,14 +34,27 @@ from weather import FMIWeatherClient, WeatherData, weather_client, draw_weather_
 # Add lib folder for display driver modules
 sys.path.append('lib')
 
-# Try to import real hardware driver, fall back to mock for preview
-PREVIEW_MODE = False
-try:
-    from waveshare_epd import epd7in5b_V2
-except (ImportError, OSError, RuntimeError) as e:
-    print(f"Hardware driver not available ({e}), using mock display for preview")
-    from waveshare_epd import epd_mock as epd7in5b_V2
-    PREVIEW_MODE = True
+DEFAULT_EPD_DRIVER = "epd7in5b_V2"
+
+
+def load_epd_driver(driver_name: str = DEFAULT_EPD_DRIVER):
+    """Import a Waveshare EPD driver module by name, falling back to the mock.
+
+    Returns a tuple of (driver_module, preview_mode) where preview_mode is True
+    when the real hardware driver could not be loaded (e.g. running off-Pi).
+    """
+    try:
+        module = importlib.import_module(f"waveshare_epd.{driver_name}")
+        return module, False
+    except (ImportError, OSError, RuntimeError) as e:
+        print(f"Hardware driver '{driver_name}' not available ({e}), using mock display for preview")
+        from waveshare_epd import epd_mock
+        return epd_mock, True
+
+
+# Resolve the default driver at import time so modules importing PREVIEW_MODE
+# (e.g. api.py) still work. The main app re-resolves it from config.
+epd7in5b_V2, PREVIEW_MODE = load_epd_driver()
 
 
 # =============================================================================
@@ -85,7 +98,10 @@ class Alert:
 
 class HSLClient:
     """Client for fetching data from the HSL API."""
-    
+
+    # Network timeout (seconds) so a hung request never freezes the display loop.
+    REQUEST_TIMEOUT = 15
+
     def __init__(self, api_url: str, api_key: str):
         self.api_url = api_url
         self.headers = {"digitransit-subscription-key": api_key}
@@ -123,7 +139,8 @@ class HSLClient:
             response = requests.post(
                 url=self.api_url,
                 headers=self.headers,
-                json={"query": query}
+                json={"query": query},
+                timeout=self.REQUEST_TIMEOUT,
             )
             responses.append(response.json())
         return responses
@@ -424,10 +441,12 @@ class BusScheduleDisplay:
     """Main application class for the bus schedule display."""
     
     def __init__(self):
-        self.epd = epd7in5b_V2.EPD()
-        
         # Load full config
         self.config = load_config()
+
+        # Resolve the display driver from config (falls back to mock off-Pi)
+        driver_module, self.preview_mode = load_epd_driver(self.config.epd_driver)
+        self.epd = driver_module.EPD()
         
         # Initialize fonts with layout config
         self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
@@ -480,7 +499,7 @@ class BusScheduleDisplay:
                 self._handle_error("UNEXPECTED")
             
             # In preview mode, just render once and exit
-            if PREVIEW_MODE:
+            if self.preview_mode:
                 print("\n[PREVIEW MODE] Rendered once. Exiting.")
                 break
             

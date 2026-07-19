@@ -107,6 +107,16 @@ The easiest way to run E-Display is using Docker.
     ```
     The UI will be available at `http://localhost:3000`.
 
+## Testing
+
+The backend has a unit-test suite that runs without hardware or network access
+(the e-ink driver falls back to a mock automatically):
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
 ## Configuration
 
 Configuration is stored in `config.json` in the root directory. You can edit this file manually or use the Web UI.

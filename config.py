@@ -135,10 +135,10 @@ class LayoutConfig:
             clock_x=data.get('clock_x', 400),
             clock_y=data.get('clock_y', 10),
             route_col_x=data.get('route_col_x', 40),
-            route_col_width=data.get('route_col_width', 80),
+            route_col_width=data.get('route_col_width', 100),
             destination_col_x=data.get('destination_col_x', 100),
             time_col_x=data.get('time_col_x', 770),
-            time_col_width=data.get('time_col_width', 80),
+            time_col_width=data.get('time_col_width', 180),
             header_y=data.get('header_y', 50),
             alert_y=data.get('alert_y', 390),
             alert_width=data.get('alert_width', 780),
@@ -160,6 +160,7 @@ class Config:
     refresh_interval_seconds: int
     display: DisplaySettings
     layout: LayoutConfig
+    epd_driver: str = "epd7in5b_V2"  # Waveshare driver module name in lib/waveshare_epd
     weather: WeatherConfig = None
 
     def __post_init__(self):
@@ -193,6 +194,7 @@ class Config:
             refresh_interval_seconds=data.get('refresh_interval_seconds', 300),
             display=display,
             layout=layout,
+            epd_driver=data.get('epd_driver', 'epd7in5b_V2'),
             weather=weather,
         )
     
@@ -203,6 +205,7 @@ class Config:
             'hsl_api_key': self.hsl_api_key,
             'stops': [{'id': s.id, 'name': s.name, 'routes': s.routes} for s in self.stops],
             'refresh_interval_seconds': self.refresh_interval_seconds,
+            'epd_driver': self.epd_driver,
             'display': {
                 'max_items': self.display.max_items,
                 'show_arrival_minutes_threshold': self.display.show_arrival_minutes_threshold,
