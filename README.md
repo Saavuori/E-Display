@@ -1,5 +1,7 @@
 # E-Display
 
+**[📖 Project site — saavuori.github.io/E-Display](https://saavuori.github.io/E-Display/)**
+
 **E-Display** is a smart, e-ink public transport display for Helsinki Regional Transport (HSL) data. It is designed to run on a Raspberry Pi connected to a Waveshare 7.5" E-Ink display (Black/White/Red).
 
 The project consists of two main components:
