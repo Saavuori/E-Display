@@ -1,42 +1,54 @@
-# Use standard Python 3.11 slim image
-FROM python:3.11-slim-bookworm
+# =============================================================================
+# Stage 1: Build the virtualenv
+# =============================================================================
+FROM python:3.11-slim-bookworm AS builder
 
-# Set working directory
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# RPi.GPIO and spidev ship as source distributions and need a C toolchain.
+# Everything else (Pillow, numpy, pydantic-core) resolves to manylinux aarch64
+# wheels, so none of the image libraries (libjpeg, freetype, lcms2, ...) are
+# needed here — they were only ever slowing the build down.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
+# Byte-compile on install so the Pi doesn't pay that cost at first import.
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+# Dependencies come from the lockfile only, so this layer stays cached until
+# pyproject.toml or uv.lock actually changes.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --extra pi
+
+
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM python:3.11-slim-bookworm
 
 # Version info injected at build time by CI
 ARG VERSION=dev
 ARG BUILD_DATE=""
 ARG GIT_SHA=""
-ENV APP_VERSION=${VERSION}
-ENV APP_BUILD_DATE=${BUILD_DATE}
-ENV APP_GIT_SHA=${GIT_SHA}
 
-# Ensure Python output is sent straight to terminal (e.g. your container log)
-# without being first buffered and that you can see the output of your application (e.g. django logs) in real time.
-ENV PYTHONUNBUFFERED=1
+# PYTHONUNBUFFERED sends Python output straight to the container log.
+# PATH puts the virtualenv first so `python` / `uvicorn` resolve to it.
+ENV APP_VERSION=${VERSION} \
+    APP_BUILD_DATE=${BUILD_DATE} \
+    APP_GIT_SHA=${GIT_SHA} \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
 
-# Install system dependencies required for Pillow and hardware access
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libjpeg-dev \
-    zlib1g-dev \
-    libfreetype6-dev \
-    liblcms2-dev \
-    libopenjp2-7-dev \
-    libtiff5-dev \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-
-
-# Copy requirements first to leverage cache
-COPY requirements.txt .
-
-# Install Python dependencies
-# Note: RPi.GPIO and spidev might need --break-system-packages or virtualenv in some distros, 
-# but in docker slim containers pip install is usually fine as root.
-RUN pip install --no-cache-dir -r requirements.txt
+# The compiler and its headers stay behind in the builder stage.
+COPY --from=builder /app/.venv /app/.venv
 
 # Copy application code
 COPY . .

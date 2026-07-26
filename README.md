@@ -66,26 +66,32 @@ The easiest way to run E-Display is using Docker.
 
 ### Backend (Python)
 
-1.  Create a virtual environment:
+Dependencies are managed with [uv](https://docs.astral.sh/uv/). Install it once:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+1.  Create the environment and install dependencies:
     ```bash
-    python -m venv venv
-    source venv/bin/activate  # On Windows: venv\Scripts\activate
+    uv sync
+    ```
+    This creates `.venv/` using the Python version pinned in `.python-version`,
+    downloading it automatically if you don't have it. On a Raspberry Pi, add
+    the hardware extra to pull in `RPi.GPIO` and `spidev`:
+    ```bash
+    uv sync --extra pi
     ```
 
-2.  Install dependencies:
+2.  Run the API server:
     ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  Run the API server:
-    ```bash
-    python api.py
+    uv run python api.py
     ```
     The API will be available at `http://localhost:8000`.
 
-4.  Run the Display script (standalone):
+3.  Run the Display script (standalone):
     ```bash
-    python display.py
+    uv run python display.py
     ```
     *Note: On non-Raspberry Pi systems, this will run in "Mock Mode" and generate a preview image instead of driving hardware.*
 
@@ -113,8 +119,7 @@ The backend has a unit-test suite that runs without hardware or network access
 (the e-ink driver falls back to a mock automatically):
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
-pytest
+uv run pytest
 ```
 
 ## Configuration
