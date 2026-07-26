@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E-Display — Helsinki departures, printed on paper</title>
+<meta name="description" content="E-Display renders live HSL departures onto a 7.5-inch e-paper panel driven by a Raspberry Pi. Open source, Dockerised, with a browser-based layout editor.">
+<meta name="theme-color" content="#e3e5e1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161918" media="(prefers-color-scheme: dark)">
+
+<meta property="og:title" content="E-Display — Helsinki departures, printed on paper">
+<meta property="og:description" content="Live HSL departures on a 7.5-inch e-paper panel, driven by a Raspberry Pi.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/eink-preview.png">
+
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23faf8f2'/%3E%3Crect x='5' y='9' width='22' height='2' fill='%23b3161c'/%3E%3Crect x='5' y='15' width='14' height='2' fill='%2314100e'/%3E%3Crect x='5' y='21' width='18' height='2' fill='%2314100e'/%3E%3C/svg%3E">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <div class="wrap topbar__inner">
+    <a class="mark" href="#top">
+      <span class="mark__glyph" aria-hidden="true"></span>
+      E&#8209;Display
+    </a>
+    <nav class="topnav" aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#panel">Control panel</a>
+      <a href="#start">Quick start</a>
+      <a href="#hardware">Hardware</a>
+      <a class="topnav__cta" href="https://github.com/Saavuori/E-Display">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ───────────────────────── hero ───────────────────────── -->
+  <section class="hero" id="top">
+    <div class="wrap hero__inner">
+      <p class="eyebrow">Raspberry&nbsp;Pi · Waveshare 7.5&Prime; B/W/R · HSL open data</p>
+      <h1 class="hero__title">The next tram,<br><em>printed on paper.</em></h1>
+      <p class="hero__lede">
+        E-Display pulls live departures from Helsinki Regional Transport and draws them
+        onto a 7.5-inch e-paper panel. No backlight, no app, no unlocking your phone
+        on the way out the door — just the wall telling you whether to run.
+      </p>
+      <p class="hero__actions">
+        <a class="btn btn--primary" href="#start">Get started</a>
+        <a class="btn" href="https://github.com/Saavuori/E-Display">View source</a>
+      </p>
+
+      <figure class="device">
+        <div class="board" id="board">
+          <div class="board__paper">
+            <div class="board__top">
+              <span class="board__clock" id="clock">13:56</span>
+              <span class="board__wx">
+                <svg viewBox="0 0 46 46" aria-hidden="true" class="wx-icon">
+                  <circle cx="23" cy="23" r="9" fill="currentColor"/>
+                  <g stroke="currentColor" stroke-width="3" stroke-linecap="square">
+                    <path d="M23 2v7M23 37v7M2 23h7M37 23h7M8 8l5 5M33 33l5 5M38 8l-5 5M13 33l-5 5"/>
+                  </g>
+                </svg>
+                <span id="temp">&minus;4.2&deg;C</span>
+              </span>
+            </div>
+
+            <div class="board__head">
+              <span>Linja</span>
+              <span>Määränpää</span>
+              <span>Aika/min</span>
+            </div>
+
+            <ol class="board__rows" id="rows">
+              <li class="row"><span class="row__line">1T</span><span class="row__dest">Käpylä via Bulevardi</span><span class="row__time" data-offset="5">5</span></li>
+              <li class="row"><span class="row__line">7</span><span class="row__dest">Meilahden sairaala via Päärautatieas.</span><span class="row__time" data-offset="11">14:07</span></li>
+              <li class="row"><span class="row__line">9</span><span class="row__dest">Ilmala via Päärautatieas.</span><span class="row__time" data-offset="15">14:11</span></li>
+              <li class="row"><span class="row__line">1T</span><span class="row__dest">Käpylä via Bulevardi</span><span class="row__time" data-offset="16">14:12</span></li>
+              <li class="row"><span class="row__line">7</span><span class="row__dest">Meilahden sairaala via Päärautatieas.</span><span class="row__time" data-offset="21">14:17</span></li>
+            </ol>
+
+            <p class="board__alert">Ratikat 2, 3, 4 ja 7 poikkeusreitillä la 13.12. klo 17&ndash;19 Lucia-kulkueen aikana</p>
+          </div>
+        </div>
+        <figcaption class="device__cap">
+          <span class="dot" aria-hidden="true"></span>
+          Live re-creation of the real 800&times;480 render, with the five-minute refresh cycle sped
+          up. The flicker is the e-paper clearing itself, not a bug.
+        </figcaption>
+      </figure>
+
+      <dl class="specs">
+        <div class="spec"><dt>Resolution</dt><dd>800 &times; 480</dd></div>
+        <div class="spec"><dt>Ink</dt><dd>Black · White · Red</dd></div>
+        <div class="spec"><dt>Panel</dt><dd>7.5&Prime; epd7in5b_V2</dd></div>
+        <div class="spec"><dt>Refresh</dt><dd>300 s, configurable</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── features ───────────────────────── -->
+  <section class="band" id="features">
+    <div class="wrap">
+      <h2 class="h2">What it puts on the wall</h2>
+      <p class="section-lede">
+        Everything is driven from one <code>config.json</code> — stops, filters, fonts, pixel
+        positions. Edit it by hand or from the browser; both write the same file.
+      </p>
+
+      <ul class="cards">
+        <li class="card">
+          <h3>Departures from several stops at once</h3>
+          <p>Query any number of HSL stops through the Digitransit GraphQL API and merge them
+             into one sorted list. Keep only the routes you actually take, and hide departures
+             you could never reach in time.</p>
+        </li>
+        <li class="card">
+          <h3>Minutes when it matters, clock time when it doesn't</h3>
+          <p>Anything arriving inside the threshold — ten minutes by default — counts down in
+             minutes. Everything further out shows as a departure time.</p>
+        </li>
+        <li class="card card--signal">
+          <h3>Disruption alerts in the red layer</h3>
+          <p>Alerts on the routes you follow are wrapped into the strip below the grid, and the
+             rules use the panel's third colour. That is what the red ink is for.</p>
+        </li>
+        <li class="card">
+          <h3>Weather without another API key</h3>
+          <p>Temperature and conditions come from the Finnish Meteorological Institute's open
+             WFS feed, cached for 30 minutes and drawn as hand-plotted 1-bit icons that survive
+             a monochrome panel.</p>
+        </li>
+        <li class="card">
+          <h3>Runs on your laptop too</h3>
+          <p>When the Waveshare driver can't be imported, the renderer falls back to a mock
+             panel and writes a PNG instead. The whole 18-test suite runs without hardware or
+             network access.</p>
+        </li>
+        <li class="card">
+          <h3>Ships as containers</h3>
+          <p>Backend, control panel and display driver are published to GHCR and started with
+             one <code>docker compose up</code>. A scoped Watchtower keeps them current.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── pipeline ───────────────────────── -->
+  <section class="band band--alt" id="how">
+    <div class="wrap">
+      <h2 class="h2">How a departure reaches the wall</h2>
+      <p class="section-lede">
+        One loop, five stages, repeated on the refresh interval. Stage 05 is the slow one:
+        a full e-paper refresh takes a couple of seconds and the panel flashes while it settles.
+      </p>
+
+      <ol class="flow">
+        <li class="step">
+          <p class="step__n">01</p>
+          <h3>Fetch</h3>
+          <p>A GraphQL query per configured stop hits <code>api.digitransit.fi</code> for the next
+             departures, realtime offsets and active alerts.</p>
+        </li>
+        <li class="step">
+          <p class="step__n">02</p>
+          <h3>Filter</h3>
+          <p>Departures are merged, sorted, trimmed to <code>max_items</code>, and anything closer
+             than <code>hide_arrival_before_minutes</code> is dropped.</p>
+        </li>
+        <li class="step">
+          <p class="step__n">03</p>
+          <h3>Enrich</h3>
+          <p>The cached FMI reading supplies temperature and a symbol code, which maps to one of
+             nine icons drawn with primitives, not bitmaps.</p>
+        </li>
+        <li class="step">
+          <p class="step__n">04</p>
+          <h3>Render</h3>
+          <p>Pillow paints two 800&times;480 one-bit images — one for black, one for red — using the
+             exact coordinates stored in the layout config.</p>
+        </li>
+        <li class="step">
+          <p class="step__n">05</p>
+          <h3>Push</h3>
+          <p>Both planes go out over SPI to the Waveshare HAT. Once a day, at 03:00, the panel gets
+             a full clear to shake off ghosting.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── control panel ───────────────────────── -->
+  <section class="band" id="panel">
+    <div class="wrap panel">
+      <div class="panel__copy">
+        <h2 class="h2">Move a pixel from the sofa</h2>
+        <p class="section-lede">
+          The control panel is a Next.js app talking to the FastAPI backend. Search for a stop by
+          street address, pick the routes you care about, then drag the layout until it reads well
+          from across the room.
+        </p>
+        <ul class="ticks">
+          <li><strong>Stop search by address.</strong> Type “Mannerheimintie 10”, choose a radius,
+              and get every stop nearby with its routes and distance.</li>
+          <li><strong>Visual layout editor.</strong> Every element on the panel — clock, weather,
+              columns, alert strip, five font sizes — is a labelled box you can nudge with sliders.</li>
+          <li><strong>Live preview.</strong> The preview is rendered by the same code that drives the
+              hardware, so what you see is what the ink does.</li>
+          <li><strong>Reset and revert.</strong> Changes are staged; apply them when they look right,
+              or fall back to defaults.</li>
+        </ul>
+        <p class="panel__note">Backend on <code>:8000</code>, control panel on <code>:3000</code>.</p>
+      </div>
+
+      <figure class="shot">
+        <div class="shot__frame">
+          <div class="shot__chrome" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="shot__scroll">
+            <img src="assets/control-panel.png" alt="The E-Display control panel: stop configuration and live preview at the top, visual layout editor with labelled elements and sliders below." loading="lazy" width="1459" height="2805">
+          </div>
+        </div>
+        <figcaption>Scroll inside the frame — configuration above, layout editor below.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── quick start ───────────────────────── -->
+  <section class="band band--alt" id="start">
+    <div class="wrap">
+      <h2 class="h2">Quick start</h2>
+      <p class="section-lede">
+        Three commands on a Raspberry Pi with SPI enabled and Docker installed. A free Digitransit
+        API key is the only credential you need.
+      </p>
+
+      <div class="steps">
+        <article class="qs">
+          <p class="qs__n">Step 1</p>
+          <h3>Clone it and add your key</h3>
+          <p>Register at the <a href="https://portal-api.digitransit.fi/">Digitransit developer portal</a>,
+             then drop the key into <code>.env</code>.</p>
+<pre><code>git clone https://github.com/Saavuori/E-Display.git
+cd E-Display
+echo "HSL_API_KEY=your_key_here" &gt; .env</code></pre>
+        </article>
+
+        <article class="qs">
+          <p class="qs__n">Step 2</p>
+          <h3>Start the stack</h3>
+          <p>Backend, control panel, display driver and the auto-updater come up together.</p>
+<pre><code>docker compose up -d</code></pre>
+        </article>
+
+        <article class="qs">
+          <p class="qs__n">Step 3</p>
+          <h3>Choose your stops</h3>
+          <p>Open the control panel, search for the stops outside your door, arrange the layout,
+             and apply.</p>
+<pre><code>http://&lt;your-pi-ip&gt;:3000</code></pre>
+        </article>
+      </div>
+
+      <div class="aside">
+        <h3>No panel yet?</h3>
+        <p>Run the renderer anywhere. Without the Waveshare driver it switches to the mock panel and
+           writes the frame to <code>pic/screen_output_bw.png</code>, so you can design the layout
+           before the hardware arrives.</p>
+<pre><code>pip install -r requirements.txt
+python display.py</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── hardware + api ───────────────────────── -->
+  <section class="band" id="hardware">
+    <div class="wrap two">
+      <div>
+        <h2 class="h2">What you need</h2>
+        <ul class="bom">
+          <li><span>Raspberry Pi</span><em>Zero&nbsp;W, 3 or 4 — anything with SPI</em></li>
+          <li><span>Waveshare 7.5&Prime; e-Paper (B)</span><em>800&times;480, black / white / red</em></li>
+          <li><span>e-Paper driver HAT</span><em>SPI, ships with the panel</em></li>
+          <li><span>microSD card + power</span><em>Raspberry Pi OS Lite is plenty</em></li>
+          <li><span>A frame</span><em>Optional. It is a sheet of paper, after all</em></li>
+        </ul>
+        <p class="fineprint">
+          Other Waveshare panels work by changing <code>epd_driver</code> in the config, as long as the
+          module exists in <code>lib/waveshare_epd</code>.
+        </p>
+      </div>
+
+      <div>
+        <h2 class="h2">REST API</h2>
+        <table class="api">
+          <thead><tr><th scope="col">Endpoint</th><th scope="col">Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>GET&nbsp;/api/config</code></td><td>Read the full configuration</td></tr>
+            <tr><td><code>POST&nbsp;/api/config</code></td><td>Write stops, display and weather settings</td></tr>
+            <tr><td><code>GET&nbsp;/api/stops/search</code></td><td>Geocode an address, list stops within a radius</td></tr>
+            <tr><td><code>GET&nbsp;/api/arrivals</code></td><td>Current departures, as the panel sees them</td></tr>
+            <tr><td><code>GET&nbsp;/api/weather</code></td><td>Cached FMI temperature and conditions</td></tr>
+            <tr><td><code>GET&nbsp;/api/preview</code></td><td>Rendered PNG of the next frame</td></tr>
+            <tr><td><code>POST&nbsp;/api/refresh</code></td><td>Ask the display loop to redraw now</td></tr>
+            <tr><td><code>GET&nbsp;·&nbsp;PUT&nbsp;/api/layout</code></td><td>Read or replace pixel positions and font sizes</td></tr>
+            <tr><td><code>GET&nbsp;/api/layout/elements</code></td><td>Element boxes for the visual editor</td></tr>
+            <tr><td><code>GET&nbsp;/api/version</code></td><td>Build version, date and commit</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── close ───────────────────────── -->
+  <section class="close">
+    <div class="wrap close__inner">
+      <h2>Build one this weekend</h2>
+      <p>MIT licensed. Issues and pull requests welcome.</p>
+      <p class="hero__actions">
+        <a class="btn btn--primary" href="https://github.com/Saavuori/E-Display">Open the repository</a>
+        <a class="btn" href="https://github.com/Saavuori/E-Display#quick-start-docker">Read the README</a>
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot__inner">
+    <p class="foot__mark">E&#8209;Display</p>
+    <p class="foot__links">
+      <a href="https://github.com/Saavuori/E-Display">Source</a>
+      <a href="https://digitransit.fi/en/developers/">Digitransit</a>
+      <a href="https://en.ilmatieteenlaitos.fi/open-data">FMI open data</a>
+      <a href="https://www.waveshare.com/7.5inch-e-paper-hat-b.htm">Waveshare panel</a>
+    </p>
+    <p class="foot__fine">
+      Departure and alert data © Helsinki Regional Transport (HSL) via Digitransit, licensed CC BY 4.0.
+      Weather © Finnish Meteorological Institute. A community project, not affiliated with HSL.
+    </p>
+  </div>
+</footer>
+
+<script src="board.js"></script>
+</body>
+</html>
