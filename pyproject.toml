@@ -1,0 +1,34 @@
+[project]
+name = "e-display"
+version = "0.0.0"
+description = "E-ink public transport display for HSL (Helsinki) data"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi==0.109.2",
+    "uvicorn==0.27.1",
+    "requests==2.31.0",
+    "Pillow==10.2.0",
+    "pydantic==2.6.1",
+    "python-multipart==0.0.9",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+# Raspberry Pi hardware access. Both ship as source distributions and need a C
+# toolchain, so they are kept out of the default set — installing them off-Pi
+# (Windows/macOS dev machines) would fail. Enable with: uv sync --extra pi
+pi = [
+    "RPi.GPIO==0.7.1; sys_platform == 'linux'",
+    "spidev==3.6; sys_platform == 'linux'",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+# This is an application, not a distributable library — don't try to build and
+# install the project itself into the environment.
+package = false
