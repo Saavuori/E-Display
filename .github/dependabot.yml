@@ -1,0 +1,104 @@
+version: 2
+
+# Two Dockerfiles (root backend + web-ui) and a uv-locked Python project, so
+# the `docker` entry lists both directories rather than repeating the block.
+#
+# Every entry carries a 3-day cooldown: a version that gets yanked shortly
+# after publishing never reaches a PR.
+
+updates:
+  # ---- Python backend (uv.lock) ----
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, python]
+    cooldown:
+      default-days: 3
+    groups:
+      uv-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- Web UI ----
+  - package-ecosystem: npm
+    directory: /web-ui
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    labels: [dependencies, frontend]
+    cooldown:
+      default-days: 3
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- Dockerfile base images (backend + web-ui) ----
+  - package-ecosystem: docker
+    directories: ["/", "/web-ui"]
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, docker]
+    cooldown:
+      default-days: 3
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- compose service images ----
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, docker]
+    cooldown:
+      default-days: 3
+    ignore:
+      # Our own images are pinned to :latest by design — the host pulls them, so a
+      # PR bumping a tag that never moves is pure noise.
+      # Both patterns are listed because this repo publishes nested paths
+      # (ghcr.io/saavuori/e-display/backend), not a single top-level image.
+      # containrrr/watchtower is third-party and stays in scope.
+      - dependency-name: ghcr.io/saavuori/*
+      - dependency-name: ghcr.io/saavuori/e-display/*
+    groups:
+      compose-minor-patch:
+        update-types: [minor, patch]
+
+  # ---- GitHub Actions ----
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Europe/Helsinki
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: [dependencies, ci]
+    cooldown:
+      default-days: 3
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
