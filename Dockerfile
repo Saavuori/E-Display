@@ -1,7 +1,7 @@
 # =============================================================================
 # Stage 1: Build the virtualenv
 # =============================================================================
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.14-slim-bookworm AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM python:3.11-slim-bookworm
+FROM python:3.14-slim-bookworm
 
 # Version info injected at build time by CI
 ARG VERSION=dev
