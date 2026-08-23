@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # github.repository preserves the owner's capitalisation (Saavuori/E-Display)
       # but Docker references must be lowercase. metadata-action normalises the
@@ -138,7 +138,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Normalize image name
         run: echo "IMAGE_LC=${IMAGE_NAME_WEBUI,,}" >> "$GITHUB_ENV"
