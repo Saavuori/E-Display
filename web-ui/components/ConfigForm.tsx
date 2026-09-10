@@ -28,7 +28,10 @@ interface WeatherSettings {
 
 interface Config {
     hsl_api_url: string;
+    // "" means "keep the stored key" — the API never sends the real one back.
     hsl_api_key: string;
+    hsl_api_key_set?: boolean;
+    hsl_api_key_from_env?: boolean;
     stops: Stop[];
     refresh_interval_seconds: number;
     display: DisplaySettings;
@@ -39,10 +42,18 @@ interface ConfigFormProps {
     config: Config;
     onSave: (config: Config) => void;
     saving: boolean;
-    apiBase?: string;
+    /** Empty string means "use relative paths", which next.config.ts proxies. */
+    apiBase: string;
 }
 
-export default function ConfigForm({ config, onSave, saving, apiBase = "http://localhost:8000" }: ConfigFormProps) {
+/** parseInt on a cleared input yields NaN, which serialises to null and is
+ *  rejected by the API — fall back to the value already in the form. */
+const toInt = (value: string, fallback: number): number => {
+    const parsed = parseInt(value, 10);
+    return Number.isNaN(parsed) ? fallback : parsed;
+};
+
+export default function ConfigForm({ config, onSave, saving, apiBase }: ConfigFormProps) {
     const [formData, setFormData] = useState<Config>(config);
 
     // Track if form has changes
@@ -133,9 +144,22 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                         <input
                             type="password"
                             value={formData.hsl_api_key}
+                            placeholder={
+                                config.hsl_api_key_from_env
+                                    ? "Set via HSL_API_KEY — overrides this field"
+                                    : config.hsl_api_key_set
+                                        ? "Saved — type to replace"
+                                        : "Not configured"
+                            }
                             onChange={(e) => setFormData({ ...formData, hsl_api_key: e.target.value })}
                             className={inputClass}
+                            disabled={config.hsl_api_key_from_env}
                         />
+                        <p className="text-xs text-zinc-500 mt-1">
+                            {config.hsl_api_key_from_env
+                                ? "Coming from the environment, so it is not stored in config.json."
+                                : "Never sent back to the browser. Leave blank to keep the saved key."}
+                        </p>
                     </div>
                 </div>
             </section>
@@ -208,7 +232,10 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                             max="3600"
                             value={formData.refresh_interval_seconds}
                             onChange={(e) =>
-                                setFormData({ ...formData, refresh_interval_seconds: parseInt(e.target.value) })
+                                setFormData({
+                                    ...formData,
+                                    refresh_interval_seconds: toInt(e.target.value, formData.refresh_interval_seconds),
+                                })
                             }
                             className={inputClass}
                         />
@@ -220,7 +247,7 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                             min="1"
                             max="10"
                             value={formData.display.max_items}
-                            onChange={(e) => updateDisplay("max_items", parseInt(e.target.value))}
+                            onChange={(e) => updateDisplay("max_items", toInt(e.target.value, formData.display.max_items))}
                             className={inputClass}
                         />
                     </div>
@@ -232,7 +259,10 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                             max="60"
                             value={formData.display.show_arrival_minutes_threshold}
                             onChange={(e) =>
-                                updateDisplay("show_arrival_minutes_threshold", parseInt(e.target.value))
+                                updateDisplay(
+                                    "show_arrival_minutes_threshold",
+                                    toInt(e.target.value, formData.display.show_arrival_minutes_threshold),
+                                )
                             }
                             className={inputClass}
                         />
@@ -245,7 +275,10 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                             max="30"
                             value={formData.display.hide_arrival_before_minutes}
                             onChange={(e) =>
-                                updateDisplay("hide_arrival_before_minutes", parseInt(e.target.value))
+                                updateDisplay(
+                                    "hide_arrival_before_minutes",
+                                    toInt(e.target.value, formData.display.hide_arrival_before_minutes),
+                                )
                             }
                             className={inputClass}
                         />
@@ -302,7 +335,9 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                             min="5"
                             max="120"
                             value={formData.weather?.cache_minutes ?? 30}
-                            onChange={(e) => updateWeather("cache_minutes", parseInt(e.target.value))}
+                            onChange={(e) =>
+                                updateWeather("cache_minutes", toInt(e.target.value, formData.weather?.cache_minutes ?? 30))
+                            }
                             className={inputClass}
                             disabled={!(formData.weather?.enabled ?? true)}
                         />

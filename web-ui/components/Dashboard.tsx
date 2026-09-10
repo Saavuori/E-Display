@@ -23,22 +23,32 @@ interface LayoutConfig {
     clock_x: number;
     clock_y: number;
     route_col_x: number;
+    route_col_width: number;
     destination_col_x: number;
     time_col_x: number;
+    time_col_width: number;
     header_y: number;
     alert_y: number;
+    alert_width: number;
     font_clock: number;
     font_numbers: number;
     font_text: number;
     font_header: number;
     font_small: number;
+    weather_x: number;
+    weather_y: number;
 }
 
 interface Config {
     hsl_api_url: string;
+    // Always "" from the API — the key itself is never sent to the browser.
+    // Send a non-empty value to change it; "" leaves the stored key alone.
     hsl_api_key: string;
+    hsl_api_key_set?: boolean;
+    hsl_api_key_from_env?: boolean;
     stops: Stop[];
     refresh_interval_seconds: number;
+    epd_driver?: string;
     display: DisplaySettings;
     layout?: LayoutConfig;
     weather?: {
@@ -129,7 +139,9 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                 body: JSON.stringify(newConfig),
             });
             if (!res.ok) throw new Error("Failed to save config");
-            setConfig(newConfig);
+            // Re-read rather than trusting the local copy: the API never
+            // echoes the key back, so this clears any value just typed in.
+            await fetchConfig();
             setPreviewKey((k) => k + 1); // Refresh preview
             setError(null);
         } catch (err) {
@@ -240,6 +252,7 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                                     config={config}
                                     onSave={handleSave}
                                     saving={saving}
+                                    apiBase={apiBase}
                                 />
                             )}
                         </div>
