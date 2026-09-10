@@ -15,21 +15,20 @@ from dataclasses import dataclass
 from typing import Optional
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
-from io import BytesIO
+from PIL import Image, ImageDraw
 
 # Import configuration from config module (loads from config.json)
 from config import (
-    BASE_DIR, PIC_DIR, ICON_DIR, FONT_DIR,
-    DISPLAY_WIDTH, DISPLAY_HEIGHT, TOP_LINE_Y, LINE_GAP,
-    COLOR_BLACK, COLOR_WHITE, COLOR_GREY,
+    PIC_DIR, FONT_DIR,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT,
+    COLOR_BLACK,
     ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
-    REFRESH_TRIGGER_FILE, TRIGGER_DIR,
-    Fonts, load_config, Config, LayoutConfig
+    REFRESH_TRIGGER_FILE,
+    Fonts, load_config, LayoutConfig
 )
 
 # Weather client
-from weather import FMIWeatherClient, WeatherData, weather_client, draw_weather_icon
+from weather import WeatherData, weather_client, draw_weather_icon
 
 # Add lib folder for display driver modules
 sys.path.append('lib')
@@ -82,7 +81,9 @@ class BusArrival:
         """Get arrival time as HH:MM format."""
         minutes, _ = divmod(self.arrival_seconds, 60)
         hours, minutes = divmod(minutes, 60)
-        return f"{hours}:{minutes:02d}"
+        # GTFS counts a post-midnight departure as hour 24+ of the service day
+        # that started the trip, so 24:25 has to be shown as 00:25.
+        return f"{hours % 24}:{minutes:02d}"
 
 
 @dataclass
@@ -106,60 +107,83 @@ class HSLClient:
         self.api_url = api_url
         self.headers = {"digitransit-subscription-key": api_key}
     
-    def _build_query(self, stop_id: str) -> str:
-        """Build GraphQL query for a stop."""
-        return f'''
-        {{
-            stop(id:"{stop_id}") {{ 
-                stoptimesWithoutPatterns {{
-                    trip {{
-                        route {{
-                            shortName 
-                            alerts {{ 
+    # The stop id travels as a query variable so an id from config.json is
+    # never spliced into the query document.
+    STOP_QUERY = '''
+        query StopArrivals($stopId: String!) {
+            stop(id: $stopId) {
+                stoptimesWithoutPatterns {
+                    trip {
+                        route {
+                            shortName
+                            alerts {
                                 alertHeaderText
                                 alertSeverityLevel
-                            }}                   
-                        }}           
-                    }}            
+                            }
+                        }
+                    }
                     realtimeArrival
                     scheduledArrival
                     arrivalDelay
                     realtimeState
                     headsign
-                }}
-            }}
-        }}
+                }
+            }
+        }
         '''
-    
+
     def fetch_stop_data(self, stop_ids: list[str]) -> list[dict]:
-        """Fetch arrival data for multiple stops."""
+        """Fetch arrival data for multiple stops.
+
+        One unreachable stop must not cost the whole screen, so a failed stop
+        contributes an empty response and the rest still render. If *every*
+        stop fails the error is re-raised, so the caller still shows the
+        connection error screen instead of a blank timetable.
+        """
         responses = []
+        last_error: Optional[Exception] = None
+
         for stop_id in stop_ids:
-            query = self._build_query(stop_id)
-            response = requests.post(
-                url=self.api_url,
-                headers=self.headers,
-                json={"query": query},
-                timeout=self.REQUEST_TIMEOUT,
-            )
-            responses.append(response.json())
+            try:
+                response = requests.post(
+                    url=self.api_url,
+                    headers=self.headers,
+                    json={"query": self.STOP_QUERY, "variables": {"stopId": stop_id}},
+                    timeout=self.REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                responses.append(response.json())
+            except (requests.RequestException, ValueError) as e:
+                print(f"Error fetching stop {stop_id}: {e}", flush=True)
+                last_error = e
+
+        if last_error is not None and not responses:
+            raise last_error
+
         return responses
     
     def parse_arrivals(self, responses: list[dict], min_seconds_away: int) -> tuple[list[BusArrival], list[Alert]]:
         """Parse API responses into BusArrival and Alert objects."""
         arrivals = []
         alerts = []
+        # The same route alert repeats on every stoptime of that route, so
+        # track what has already been collected.
+        seen_alerts: set[tuple[str, str]] = set()
         current_seconds = self._seconds_since_midnight()
-        
+
         for stop_response in responses:
             stop_data = self._get_stop_times(stop_response)
             if not stop_data:
                 continue
-                
+
             for bus in stop_data:
                 # Extract alerts
-                alerts.extend(self._extract_alerts(bus))
-                
+                for alert in self._extract_alerts(bus):
+                    key = (alert.header_text, alert.severity_level)
+                    if key not in seen_alerts:
+                        seen_alerts.add(key)
+                        alerts.append(alert)
+
                 # Extract arrival info
                 arrival = self._extract_arrival(bus, current_seconds, min_seconds_away)
                 if arrival:
@@ -171,6 +195,8 @@ class HSLClient:
     
     def _get_stop_times(self, stop_response: dict) -> Optional[list]:
         """Safely extract stop times from response."""
+        if not stop_response:
+            return None
         try:
             return stop_response["data"]["stop"]["stoptimesWithoutPatterns"]
         except (KeyError, TypeError) as e:
@@ -195,17 +221,24 @@ class HSLClient:
     def _extract_arrival(self, bus_data: dict, current_seconds: int, min_seconds_away: int) -> Optional[BusArrival]:
         """Extract arrival info from bus data if it meets criteria."""
         try:
-            realtime_arrival = bus_data["realtimeArrival"]
-            
-            # Skip buses arriving too soon
-            if realtime_arrival - current_seconds <= min_seconds_away:
+            # realtimeArrival is null for a trip with no realtime feed; falling
+            # back to the timetable keeps those departures on the screen
+            # instead of silently dropping them.
+            arrival = bus_data.get("realtimeArrival")
+            if arrival is None:
+                arrival = bus_data.get("scheduledArrival")
+            if arrival is None:
                 return None
-            
+
+            # Skip buses arriving too soon
+            if arrival - current_seconds <= min_seconds_away:
+                return None
+
             return BusArrival(
                 route=bus_data["trip"]["route"]["shortName"],
                 headsign=bus_data["headsign"],
-                arrival_seconds=realtime_arrival,
-                delay=bus_data.get("arrivalDelay", 0)
+                arrival_seconds=arrival,
+                delay=bus_data.get("arrivalDelay") or 0
             )
         except (KeyError, TypeError) as e:
             print(f"Error extracting arrival: {e}")
@@ -269,24 +302,34 @@ class DisplayRenderer:
         
         return output_bw, output_red
     
-    def render_error(self, error_source: str) -> str:
-        """Render an error message and return path to output image."""
+    def render_error(self, error_source: str) -> tuple[str, str]:
+        """Render an error message.
+
+        Returns (black_layer_path, blank_red_layer_path). The red layer is
+        blank on purpose: writing the same bitmap to both planes sets every
+        error pixel twice on the three-colour panel.
+        """
         print(f'Error in the {error_source} request.')
-        
+
         error_image = Image.new('1', (self.epd.width, self.epd.height), 255)
         draw = ImageDraw.Draw(error_image)
-        
+
         draw.text((100, 150), f'{error_source} ERROR', font=self.fonts.error, fill=COLOR_BLACK)
-        draw.text((100, 300), 'Retrying in 30 seconds', font=self.fonts.small, fill=COLOR_BLACK)
-        
+        draw.text((100, 300), f'Retrying in {ERROR_RETRY_SECONDS} seconds', font=self.fonts.small, fill=COLOR_BLACK)
+
         current_time = datetime.now().strftime('%H:%M')
         draw.text((300, 365), f'Last Refresh: {current_time}', font=self.fonts.error, fill=COLOR_BLACK)
-        
+
         output_path = os.path.join(self.pic_dir, 'error.png')
         error_image.save(output_path)
         error_image.close()
-        
-        return output_path
+
+        blank_image = Image.new('1', (self.epd.width, self.epd.height), 255)
+        blank_path = os.path.join(self.pic_dir, 'error_blank.png')
+        blank_image.save(blank_path)
+        blank_image.close()
+
+        return output_path, blank_path
     
     def write_to_screen(self, image_bw_path: str, image_red_path: str):
         """Write images to the e-paper display."""
@@ -420,8 +463,7 @@ class DisplayRenderer:
             return
         
         # Calculate centered X start position
-        # Default width is 780 if not set (fallback)
-        alert_width = getattr(self.layout, 'alert_width', 780)
+        alert_width = self.layout.alert_width
         x_start = (DISPLAY_WIDTH - alert_width) // 2
         
         # Estimate characters per line based on width and font size (approx 0.6 aspect ratio)
@@ -445,26 +487,44 @@ class BusScheduleDisplay:
         self.config = load_config()
 
         # Resolve the display driver from config (falls back to mock off-Pi)
-        driver_module, self.preview_mode = load_epd_driver(self.config.epd_driver)
-        self.epd = driver_module.EPD()
-        
+        self.renderer = None
+        self._epd_driver_name = None
+        self.preview_mode = False
+        self.epd = None
+        self._apply_epd_driver()
+
         # Initialize fonts with layout config
         self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
-        
+
         # Initialize renderer with layout config
         self.renderer = DisplayRenderer(
-            self.epd, 
-            self.fonts, 
-            PIC_DIR, 
+            self.epd,
+            self.fonts,
+            PIC_DIR,
             layout=self.config.layout,
             max_items=self.config.display.max_items,
             show_minutes_threshold=self.config.display.show_arrival_minutes_threshold
         )
-        
+
         self.hsl_client = HSLClient(self.config.hsl_api_url, self.config.hsl_api_key)
-        
+
         # Configure the shared weather client from loaded config
-        weather_client._cache_minutes = self.config.weather.cache_minutes
+        weather_client.set_cache_minutes(self.config.weather.cache_minutes)
+
+    def _apply_epd_driver(self):
+        """(Re)resolve the panel driver when the configured name changes.
+
+        Re-imported rather than cached from startup so switching epd_driver in
+        the web UI takes effect on the next cycle, like every other setting.
+        """
+        if self.config.epd_driver == self._epd_driver_name:
+            return
+
+        driver_module, self.preview_mode = load_epd_driver(self.config.epd_driver)
+        self.epd = driver_module.EPD()
+        self._epd_driver_name = self.config.epd_driver
+        if self.renderer is not None:
+            self.renderer.epd = self.epd
     
     def run(self):
         """Main application loop."""
@@ -474,19 +534,28 @@ class BusScheduleDisplay:
             # Reload configuration to pick up changes
             try:
                 new_config = load_config()
+                layout_changed = new_config.layout != self.config.layout
                 self.config = new_config
-                
+
+                # Rebuilding Fonts re-reads the TTF from disk, so only do it
+                # when a font size (or anything else in the layout) moved.
+                if layout_changed:
+                    self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
+                    self.renderer.fonts = self.fonts
+
                 # Update dependent components
-                self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
-                self.renderer.fonts = self.fonts
                 self.renderer.layout = self.config.layout
                 self.renderer.max_items = self.config.display.max_items
                 self.renderer.show_minutes_threshold = self.config.display.show_arrival_minutes_threshold
-                
+
                 # Update HSL client keys if changed
                 self.hsl_client.api_url = self.config.hsl_api_url
                 self.hsl_client.headers = {"digitransit-subscription-key": self.config.hsl_api_key}
-                
+
+                # Panel driver and weather cache TTL are config too
+                self._apply_epd_driver()
+                weather_client.set_cache_minutes(self.config.weather.cache_minutes)
+
             except Exception as e:
                 print(f"Error reloading config: {e}")
 
@@ -511,24 +580,29 @@ class BusScheduleDisplay:
             refresh_interval = self.config.refresh_interval_seconds
             print(f"Sleeping for {refresh_interval} seconds...", flush=True)
             
+            trigger_unreadable = False
             for i in range(refresh_interval):
                 # Check for manual refresh trigger from web UI
                 if os.path.exists(REFRESH_TRIGGER_FILE):
-                    print("Manual refresh triggered from web UI", flush=True)
                     try:
                         os.remove(REFRESH_TRIGGER_FILE)
-                        break  # Only break if we successfully removed the file OR decided to proceed
-                    except OSError as e:
-                        print(f"ERROR: Could not remove trigger file: {e}", flush=True)
-                        # If we can't remove it, we shouldn't infinitely loop. 
-                        # We'll ignore the trigger this time and continue sleeping to prevent rapid cycling.
-                        # OR we break, but then it will trigger again immediately.
-                        # Safer to ignore it for now or try to clear it later?
-                        # Let's break, but users will see rapid refresh. But at least we log the error.
+                        print("Manual refresh triggered from web UI", flush=True)
                         break
-                
+                    except OSError as e:
+                        # Breaking here would re-trigger on the next pass and
+                        # spin the panel through a full refresh every second,
+                        # which wears the e-ink out. Serve the rest of the
+                        # interval instead and warn once.
+                        if not trigger_unreadable:
+                            print(
+                                f"ERROR: Could not remove trigger file, ignoring "
+                                f"manual refresh: {e}",
+                                flush=True,
+                            )
+                            trigger_unreadable = True
+
                 time.sleep(1)
-                
+
                 # Optional: print countdown every minute
                 if (refresh_interval - i) % 60 == 0:
                     print(f"Time to next refresh: {refresh_interval - i}s", flush=True)
@@ -564,8 +638,8 @@ class BusScheduleDisplay:
     
     def _handle_error(self, error_type: str):
         """Handle and display an error."""
-        error_image = self.renderer.render_error(error_type)
-        self.renderer.write_to_screen(error_image, error_image)
+        error_image, blank_image = self.renderer.render_error(error_type)
+        self.renderer.write_to_screen(error_image, blank_image)
         time.sleep(ERROR_RETRY_SECONDS)
 
 
