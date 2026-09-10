@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 # Import from config module
 from config import (
-    PIC_DIR, FONT_DIR, REFRESH_TRIGGER_FILE, TRIGGER_DIR,
+    PIC_DIR, DISPLAY_WIDTH, DISPLAY_HEIGHT, REFRESH_TRIGGER_FILE, TRIGGER_DIR,
     load_config, save_config, Config as ConfigData,
     Fonts, StopConfig, DisplaySettings, LayoutConfig, WeatherConfig
 )
@@ -21,18 +21,30 @@ from config import (
 # Import display engine components
 import sys
 sys.path.append('lib')
-from display import HSLClient, DisplayRenderer, BusArrival, Alert, PREVIEW_MODE
+from display import HSLClient, DisplayRenderer
 from waveshare_epd import epd_mock
-from weather import weather_client, WeatherData
+from weather import weather_client
 
 app = FastAPI(title="E-Display API", version="1.0.0")
 
-# Enable CORS for Next.js frontend.
-# The API uses no cookies/credentials, so allow_credentials must be False —
-# browsers reject the wildcard origin when credentials are allowed.
+# CORS for a browser that talks to this API directly. The packaged setup does
+# not need it — next.config.ts rewrites /api/* to http://backend:8000, so those
+# calls are same-origin — but `npm run dev` against a remote backend does.
+# A wildcard here would let any page the user visits read this API, and it
+# serves the HSL key, so the allowlist is explicit. Override with a
+# comma-separated CORS_ALLOW_ORIGINS.
+CORS_ALLOW_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
+    if origin.strip()
+]
+
+# The API uses no cookies/credentials, so allow_credentials stays False.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -85,7 +97,9 @@ class LayoutModel(BaseModel):
 
 class ConfigModel(BaseModel):
     hsl_api_url: str
-    hsl_api_key: str
+    # Empty means "leave the stored key alone" — the UI is never sent the real
+    # one, so it has nothing to echo back unless the user typed a new key.
+    hsl_api_key: str = ""
     stops: list[StopModel] = []
     refresh_interval_seconds: int = 300
     epd_driver: str = "epd7in5b_V2"
@@ -125,7 +139,7 @@ def generate_preview() -> str:
     current_weather = None
     if config.weather.enabled:
         try:
-            weather_client._cache_minutes = config.weather.cache_minutes
+            weather_client.set_cache_minutes(config.weather.cache_minutes)
             current_weather = weather_client.fetch_current(config.weather.location)
         except Exception as exc:
             print(f"Weather fetch failed in preview: {exc}")
@@ -155,15 +169,29 @@ def generate_preview() -> str:
 
 @app.get("/api/config")
 async def get_config():
-    """Get current configuration."""
+    """Get current configuration.
+
+    The HSL API key is never included: this endpoint is reachable by any
+    browser that can see the port. The UI only needs to know whether a key is
+    configured, and where it came from.
+    """
     config = load_config()
-    return config.to_dict()
+    data = config.to_dict()
+    data["hsl_api_key"] = ""
+    data["hsl_api_key_set"] = bool(config.hsl_api_key)
+    data["hsl_api_key_from_env"] = bool(os.environ.get("HSL_API_KEY"))
+    return data
 
 @app.post("/api/config")
 async def update_config(config: ConfigModel):
     """Update configuration."""
     # Convert Pydantic model to dataclass
     layout_data = config.layout.model_dump() if config.layout else {}
+    # An empty key means the UI never had one to send back — keep the stored
+    # value rather than blanking it out. (to_dict() drops an env-sourced key,
+    # so this cannot copy the secret from .env into config.json.)
+    existing = load_config()
+    api_key = config.hsl_api_key or existing.hsl_api_key
     weather_cfg = WeatherConfig(
         enabled=config.weather.enabled if config.weather else True,
         location=config.weather.location if config.weather else "Helsinki",
@@ -174,7 +202,7 @@ async def update_config(config: ConfigModel):
         weather_client.invalidate(config.weather.location)
     config_data = ConfigData(
         hsl_api_url=config.hsl_api_url,
-        hsl_api_key=config.hsl_api_key,
+        hsl_api_key=api_key,
         stops=[StopConfig(
             id=s.id, 
             name=s.name, 
@@ -265,7 +293,7 @@ async def get_weather():
         return {"enabled": False, "temperature": None, "description": None, "location": None}
 
     try:
-        weather_client._cache_minutes = config.weather.cache_minutes
+        weather_client.set_cache_minutes(config.weather.cache_minutes)
         data = weather_client.fetch_current(config.weather.location)
         if data is None:
             raise HTTPException(status_code=503, detail="Weather data unavailable")
@@ -324,7 +352,7 @@ async def get_arrivals():
 @app.get("/api/stops/search")
 async def search_stops(
     q: str = Query(..., description="Address or location to search near"),
-    radius: int = Query(500, description="Search radius in meters")
+    radius: int = Query(500, ge=1, le=5000, description="Search radius in meters")
 ):
     """Search for stops near an address."""
     config = load_config()
@@ -334,11 +362,15 @@ async def search_stops(
         raise HTTPException(status_code=400, detail="HSL API key not configured")
     
     headers = {"digitransit-subscription-key": api_key}
-    
-    # Step 1: Geocode the address to get coordinates
-    geocode_url = f"https://api.digitransit.fi/geocoding/v1/search?text={q}&size=1"
+
+    # Step 1: Geocode the address to get coordinates. The query goes through
+    # `params` so spaces and & in an address are encoded rather than splicing
+    # extra parameters into the URL.
+    geocode_url = "https://api.digitransit.fi/geocoding/v1/search"
     try:
-        geo_response = requests.get(geocode_url, headers=headers, timeout=15)
+        geo_response = requests.get(
+            geocode_url, headers=headers, params={"text": q, "size": 1}, timeout=15
+        )
         geo_response.raise_for_status()
         geo_data = geo_response.json()
     except requests.RequestException as e:
@@ -353,36 +385,38 @@ async def search_stops(
     lon, lat = coords[0], coords[1]
     location_name = features[0]["properties"].get("label", q)
     
-    # Step 2: Search for stops near those coordinates using GraphQL
+    # Step 2: Search for stops near those coordinates using GraphQL.
+    # Coordinates and radius travel as query variables, so nothing from the
+    # request is spliced into the query document.
     graphql_url = "https://api.digitransit.fi/routing/v2/hsl/gtfs/v1"
-    query = f'''
-    {{
-        stopsByRadius(lat: {lat}, lon: {lon}, radius: {radius}) {{
-            edges {{
-                node {{
-                    stop {{
+    query = '''
+    query StopsByRadius($lat: Float!, $lon: Float!, $radius: Int!) {
+        stopsByRadius(lat: $lat, lon: $lon, radius: $radius) {
+            edges {
+                node {
+                    stop {
                         gtfsId
                         name
                         code
                         lat
                         lon
-                        routes {{
+                        routes {
                             shortName
                             mode
-                        }}
-                    }}
+                        }
+                    }
                     distance
-                }}
-            }}
-        }}
-    }}
+                }
+            }
+        }
+    }
     '''
-    
+
     try:
         stops_response = requests.post(
             graphql_url,
             headers={**headers, "Content-Type": "application/json"},
-            json={"query": query},
+            json={"query": query, "variables": {"lat": lat, "lon": lon, "radius": radius}},
             timeout=15,
         )
         stops_response.raise_for_status()
@@ -529,7 +563,7 @@ async def get_layout_elements():
             "type": "line",
             "x": 0,
             "y": layout.top_line_y,
-            "width": 800,
+            "width": DISPLAY_WIDTH,
             "height": 4
         },
         {
@@ -538,16 +572,16 @@ async def get_layout_elements():
             "type": "line",
             "x": 0,
             "y": layout.top_line_y + max_items * layout.line_gap,
-            "width": 800,
+            "width": DISPLAY_WIDTH,
             "height": 4
         },
         {
             "id": "alerts",
             "name": "Alerts Area",
             "type": "area",
-            "x": (800 - getattr(layout, 'alert_width', 780)) // 2,
+            "x": (DISPLAY_WIDTH - layout.alert_width) // 2,
             "y": layout.alert_y,
-            "width": getattr(layout, 'alert_width', 780),
+            "width": layout.alert_width,
             "height": 60
         }
     ]
@@ -595,8 +629,8 @@ async def get_layout_elements():
         ])
     
     return {
-        "display_width": 800,
-        "display_height": 480,
+        "display_width": DISPLAY_WIDTH,
+        "display_height": DISPLAY_HEIGHT,
         "elements": elements,
         "layout": layout.to_dict()
     }
@@ -604,4 +638,6 @@ async def get_layout_elements():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    # An import string, not the app object — reload is silently ignored when
+    # uvicorn is handed an already-constructed app.
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)

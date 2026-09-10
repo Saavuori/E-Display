@@ -2,7 +2,8 @@
 
 import json
 
-from config import Config, LayoutConfig, WeatherConfig
+import config as config_module
+from config import Config, DisplaySettings, LayoutConfig, WeatherConfig
 
 
 def _sample_config() -> Config:
@@ -67,3 +68,43 @@ def test_weather_defaults():
     assert cfg.weather.enabled is True
     assert cfg.weather.location == "Helsinki"
     assert cfg.weather.cache_minutes == 30
+
+
+def test_display_settings_tolerates_partial_and_unknown_keys():
+    """A hand-edited config.json must not take the whole app down."""
+    cfg = Config.from_dict({"display": {"max_items": 3, "future_setting": 9}})
+    assert cfg.display.max_items == 3
+    # Missing keys fall back to the dataclass defaults
+    assert cfg.display.show_arrival_minutes_threshold == 10
+    assert cfg.display.hide_arrival_before_minutes == 10
+
+
+def test_display_from_dict_defaults_match_dataclass():
+    assert DisplaySettings.from_dict({}) == DisplaySettings()
+
+
+def test_weather_from_dict_defaults_match_dataclass():
+    assert WeatherConfig.from_dict({}) == WeatherConfig()
+
+
+def test_env_api_key_is_not_written_back_to_config(monkeypatch):
+    """The key lives in .env on purpose; to_dict() must not persist it."""
+    monkeypatch.setenv("HSL_API_KEY", "from-env")
+    cfg = Config.from_dict({"hsl_api_key": ""})
+    assert cfg.hsl_api_key == "from-env"       # env still wins at runtime
+    assert cfg.to_dict()["hsl_api_key"] == ""  # but never reaches config.json
+
+
+def test_file_api_key_survives_round_trip(monkeypatch):
+    monkeypatch.delenv("HSL_API_KEY", raising=False)
+    cfg = Config.from_dict({"hsl_api_key": "from-file"})
+    assert cfg.to_dict()["hsl_api_key"] == "from-file"
+
+
+def test_load_config_falls_back_on_unreadable_file(monkeypatch, tmp_path):
+    bad = tmp_path / "config.json"
+    bad.write_text("{ this is not json", encoding="utf-8")
+    monkeypatch.setattr(config_module, "CONFIG_FILE", str(bad))
+    cfg = config_module.load_config()
+    assert cfg.stops == []
+    assert cfg.display.max_items == 5

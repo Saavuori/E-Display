@@ -52,9 +52,31 @@ class StopConfig:
 
 @dataclass
 class DisplaySettings:
-    max_items: int
-    show_arrival_minutes_threshold: int
-    hide_arrival_before_minutes: int
+    max_items: int = 5
+    show_arrival_minutes_threshold: int = 10
+    hide_arrival_before_minutes: int = 10
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for saving."""
+        return {
+            'max_items': self.max_items,
+            'show_arrival_minutes_threshold': self.show_arrival_minutes_threshold,
+            'hide_arrival_before_minutes': self.hide_arrival_before_minutes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'DisplaySettings':
+        """Create DisplaySettings from a dictionary.
+
+        Reads field by field so a hand-edited config.json that omits a key —
+        or carries an extra one from a newer version — still loads instead of
+        raising TypeError out of the dataclass constructor.
+        """
+        return cls(
+            max_items=data.get('max_items', 5),
+            show_arrival_minutes_threshold=data.get('show_arrival_minutes_threshold', 10),
+            hide_arrival_before_minutes=data.get('hide_arrival_before_minutes', 10),
+        )
 
 
 @dataclass
@@ -63,6 +85,23 @@ class WeatherConfig:
     enabled: bool = True
     location: str = "Helsinki"   # FMI place name (Finnish cities)
     cache_minutes: int = 30
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for saving."""
+        return {
+            'enabled': self.enabled,
+            'location': self.location,
+            'cache_minutes': self.cache_minutes,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'WeatherConfig':
+        """Create WeatherConfig from a dictionary."""
+        return cls(
+            enabled=data.get('enabled', True),
+            location=data.get('location', 'Helsinki'),
+            cache_minutes=data.get('cache_minutes', 30),
+        )
 
 
 @dataclass
@@ -161,7 +200,7 @@ class Config:
     display: DisplaySettings
     layout: LayoutConfig
     epd_driver: str = "epd7in5b_V2"  # Waveshare driver module name in lib/waveshare_epd
-    weather: WeatherConfig = None
+    weather: Optional[WeatherConfig] = None
 
     def __post_init__(self):
         if self.weather is None:
@@ -175,18 +214,9 @@ class Config:
             name=s.get('name', ''),
             routes=s.get('routes')
         ) for s in data.get('stops', [])]
-        display = DisplaySettings(**data.get('display', {
-            'max_items': 5,
-            'show_arrival_minutes_threshold': 10,
-            'hide_arrival_before_minutes': 10
-        }))
+        display = DisplaySettings.from_dict(data.get('display', {}))
         layout = LayoutConfig.from_dict(data.get('layout', {}))
-        weather_data = data.get('weather', {})
-        weather = WeatherConfig(
-            enabled=weather_data.get('enabled', True),
-            location=weather_data.get('location', 'Helsinki'),
-            cache_minutes=weather_data.get('cache_minutes', 30),
-        )
+        weather = WeatherConfig.from_dict(data.get('weather', {}))
         return cls(
             hsl_api_url=data.get('hsl_api_url', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1'),
             hsl_api_key=os.environ.get('HSL_API_KEY') or data.get('hsl_api_key', ''),
@@ -199,47 +229,40 @@ class Config:
         )
     
     def to_dict(self) -> dict:
-        """Convert to dictionary for saving."""
+        """Convert to dictionary for saving.
+
+        A key that came from the HSL_API_KEY environment variable is written
+        out as an empty string: it lives in .env on purpose, and persisting it
+        here would copy the secret into the bind-mounted config.json. The env
+        value keeps winning on the next load either way.
+        """
+        env_key = os.environ.get('HSL_API_KEY')
+        stored_key = '' if env_key and self.hsl_api_key == env_key else self.hsl_api_key
         return {
             'hsl_api_url': self.hsl_api_url,
-            'hsl_api_key': self.hsl_api_key,
+            'hsl_api_key': stored_key,
             'stops': [{'id': s.id, 'name': s.name, 'routes': s.routes} for s in self.stops],
             'refresh_interval_seconds': self.refresh_interval_seconds,
             'epd_driver': self.epd_driver,
-            'display': {
-                'max_items': self.display.max_items,
-                'show_arrival_minutes_threshold': self.display.show_arrival_minutes_threshold,
-                'hide_arrival_before_minutes': self.display.hide_arrival_before_minutes
-            },
+            'display': self.display.to_dict(),
             'layout': self.layout.to_dict(),
-            'weather': {
-                'enabled': self.weather.enabled,
-                'location': self.weather.location,
-                'cache_minutes': self.weather.cache_minutes,
-            },
+            'weather': self.weather.to_dict(),
         }
 
 
 def load_config() -> Config:
-    """Load configuration from config.json."""
+    """Load configuration from config.json, falling back to defaults."""
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
-            data = json.load(f)
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
+                data = json.load(f)
             return Config.from_dict(data)
-    
-    # Return defaults if no config file exists
-    return Config(
-        hsl_api_url='https://api.digitransit.fi/routing/v2/hsl/gtfs/v1',
-        hsl_api_key='',
-        stops=[],
-        refresh_interval_seconds=300,
-        display=DisplaySettings(
-            max_items=5,
-            show_arrival_minutes_threshold=10,
-            hide_arrival_before_minutes=10
-        ),
-        layout=LayoutConfig()
-    )
+        except (OSError, ValueError) as e:
+            # A truncated or hand-mangled config.json must not take the display
+            # loop and the whole API down — fall through to the defaults.
+            print(f"Could not read {CONFIG_FILE} ({e}), using defaults")
+
+    return Config.from_dict({})
 
 
 def save_config(config: Config):
