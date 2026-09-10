@@ -13,8 +13,7 @@ import os
 import math
 import re
 import time
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -263,13 +262,16 @@ class FMIWeatherClient:
     called on every bus-schedule refresh cycle.
     """
 
-    FMI_WFS_URL = (
-        "https://opendata.fmi.fi/wfs"
-        "?service=WFS&version=2.0.0&request=getFeature"
-        "&storedquery_id=fmi::forecast::harmonie::surface::point::simple"
-        "&place={place}&endtime={endtime}"
-        "&parameters=Temperature,WeatherSymbol3"
-    )
+    FMI_WFS_URL = "https://opendata.fmi.fi/wfs"
+
+    # Everything but `place` and `endtime`, which vary per request.
+    FMI_WFS_PARAMS = {
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "getFeature",
+        "storedquery_id": "fmi::forecast::harmonie::surface::point::simple",
+        "parameters": "Temperature,WeatherSymbol3",
+    }
 
     def __init__(self, cache_minutes: int = 30):
         self._cache_minutes = cache_minutes
@@ -304,8 +306,12 @@ class FMIWeatherClient:
                     "location": v.location,
                     "fetched_at": v.fetched_at
                 }
-            with open(self._cache_file, "w", encoding="utf-8") as f:
+            # Write-then-rename so an interrupted save cannot leave a
+            # half-written file that the next _load_cache() chokes on.
+            tmp_file = f"{self._cache_file}.tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            os.replace(tmp_file, self._cache_file)
         except Exception as e:
             print(f"[weather] Failed to save weather cache: {e}")
 
@@ -337,6 +343,10 @@ class FMIWeatherClient:
             # Return stale cache rather than nothing
             return cached
 
+    def set_cache_minutes(self, minutes: int) -> None:
+        """Set how long a fetched reading stays fresh."""
+        self._cache_minutes = minutes
+
     def invalidate(self, place: str) -> None:
         """Force the next fetch to go to FMI (e.g. after a config change)."""
         self._cache.pop(place.lower(), None)
@@ -352,9 +362,12 @@ class FMIWeatherClient:
 
     def _fetch_from_fmi(self, place: str) -> Optional[WeatherData]:
         endtime = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        url = self.FMI_WFS_URL.format(place=place, endtime=endtime)
+        # Place names go through `params`: "Turun lentoasema" and names with
+        # Scandinavian characters need encoding, and a raw f-string would let a
+        # configured name splice extra WFS parameters into the request.
+        params = {**self.FMI_WFS_PARAMS, "place": place, "endtime": endtime}
 
-        response = requests.get(url, timeout=15)
+        response = requests.get(self.FMI_WFS_URL, params=params, timeout=15)
         response.raise_for_status()
 
         return self._parse_response(response.text, place)
@@ -395,30 +408,32 @@ class FMIWeatherClient:
             print(f"[weather] No data parsed from FMI response for '{place}'")
             return None
 
-        # Find the entry whose timestamp is closest to now (first future timestamp,
-        # or the last past one if all are in the past).
+        # Find the entry whose timestamp is closest to now: the first future
+        # timestamp, or — when every entry is already in the past — the most
+        # recent of them. Sorting by (is_past, distance from now) gives both:
+        # future entries sort ahead of past ones, and within each group the
+        # nearest to now wins.
         now_utc = datetime.now(timezone.utc)
-        best_time_str: Optional[str] = None
-        best_delta: Optional[timedelta] = None
+        candidates: list[tuple[bool, timedelta, str]] = []
 
-        for ts in sorted(data_by_time.keys()):
+        for ts in data_by_time:
             try:
                 dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
             except ValueError:
                 continue
             delta = dt - now_utc
-            # Prefer the first timestamp that is in the future (or least past)
-            if best_delta is None or (delta > timedelta(0) and (best_delta < timedelta(0) or delta < best_delta)):
-                best_delta = delta
-                best_time_str = ts
+            candidates.append((delta < timedelta(0), abs(delta), ts))
 
-        if best_time_str is None:
-            # Fall back to the most recent entry
+        if candidates:
+            best_time_str = min(candidates)[2]
+        else:
+            # No timestamp parsed — fall back to the last entry by string order.
             best_time_str = sorted(data_by_time.keys())[-1]
 
         params = data_by_time[best_time_str]
         temperature = params.get("Temperature")
-        symbol_val = int(params.get("WeatherSymbol3", 1) or 1)
+        raw_symbol = params.get("WeatherSymbol3")
+        symbol_val = int(raw_symbol) if raw_symbol is not None else 1
 
         if temperature is None:
             return None
@@ -440,5 +455,5 @@ class FMIWeatherClient:
 
 # A single shared instance reused across the API and display loop.
 # Cache TTL is initialised with the default; reconfigure via
-# `weather_client._cache_minutes = config.weather.cache_minutes`.
+# `weather_client.set_cache_minutes(config.weather.cache_minutes)`.
 weather_client = FMIWeatherClient(cache_minutes=30)

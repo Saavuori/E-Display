@@ -73,3 +73,77 @@ def test_every_symbol_has_a_draw_category():
         category = SYMBOL_CATEGORY.get(code)
         assert category is not None, f"symbol {code} has no category"
         assert category in _ICON_DRAWERS, f"category {category} has no drawer"
+
+
+def test_parse_response_picks_most_recent_when_all_past():
+    """FMI can return only past entries; the freshest one is the useful one."""
+    client = FMIWeatherClient(cache_minutes=30)
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent = (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    xml = _bswfs_xml([
+        (old, "Temperature", "-20.0"),
+        (old, "WeatherSymbol3", "1"),
+        (recent, "Temperature", "5.0"),
+        (recent, "WeatherSymbol3", "1"),
+    ])
+
+    data = client._parse_response(xml, "Helsinki")
+    assert data is not None
+    assert data.temperature == 5.0
+
+
+def test_parse_response_prefers_future_over_nearer_past():
+    client = FMIWeatherClient(cache_minutes=30)
+    now = datetime.now(timezone.utc)
+    just_past = (now - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    future = (now + timedelta(minutes=45)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    xml = _bswfs_xml([
+        (just_past, "Temperature", "-20.0"),
+        (just_past, "WeatherSymbol3", "1"),
+        (future, "Temperature", "5.0"),
+        (future, "WeatherSymbol3", "1"),
+    ])
+
+    data = client._parse_response(xml, "Helsinki")
+    assert data is not None
+    assert data.temperature == 5.0
+
+
+def test_set_cache_minutes_changes_freshness():
+    import time
+    from weather import WeatherData
+
+    client = FMIWeatherClient(cache_minutes=30)
+    reading = WeatherData(1.0, "Clear", 1, "Helsinki", time.time() - 20 * 60)
+    assert client._is_fresh(reading) is True
+
+    client.set_cache_minutes(10)
+    assert client._is_fresh(reading) is False
+
+
+def test_fmi_request_encodes_the_place_name(monkeypatch):
+    """A place with a space must be encoded, not spliced into the URL."""
+    seen = {}
+
+    class _Response:
+        text = "<empty/>"
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, params=None, timeout=None):
+        seen["url"] = url
+        seen["params"] = params
+        return _Response()
+
+    monkeypatch.setattr("weather.requests.get", fake_get)
+
+    client = FMIWeatherClient(cache_minutes=30)
+    client._fetch_from_fmi("Turun lentoasema")
+
+    assert " " not in seen["url"]
+    assert seen["params"]["place"] == "Turun lentoasema"
+    assert seen["params"]["storedquery_id"].startswith("fmi::forecast")
