@@ -28,10 +28,19 @@ restarts containers labelled `com.centurylinklabs.watchtower.scope=e-display`.
   places: the dataclass, `to_dict()`, `from_dict()`, and `config.example.json` —
   plus `LayoutModel`/`ConfigModel` in `api.py` and the web UI form. Keep the
   `from_dict()` defaults identical to the dataclass field defaults; they drifted
-  once already and were realigned in v0.0.3.
+  once already and were realigned in v0.0.3. Every sub-dataclass carries its own
+  `to_dict()`/`from_dict()` pair, and `from_dict()` reads field by field — never
+  `Cls(**data)`, which turns a hand-edited config.json into a `TypeError` that
+  takes down the display loop and every API endpoint.
 - **`HSL_API_KEY` from the environment wins** over the value in `config.json`
   (`Config.from_dict`). The key is passed into the containers from `.env` via
-  `docker-compose.yml`.
+  `docker-compose.yml`. `Config.to_dict()` writes an env-sourced key back out as
+  an empty string, so saving from the web UI cannot copy the secret out of
+  `.env` and into the bind-mounted `config.json`.
+- **The API never returns the HSL key.** `GET /api/config` blanks it and reports
+  `hsl_api_key_set`/`hsl_api_key_from_env` instead; `POST /api/config` treats an
+  empty key as "keep the stored one". Anything on the network can reach port
+  8000, so do not add an endpoint that echoes the key back.
 - **Manual refresh is a trigger file**, not an IPC call. `POST /api/refresh`
   touches `triggers/refresh`; the display loop polls for it once a second while
   sleeping and deletes it. `triggers/` must stay a *directory* — mounting a

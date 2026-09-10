@@ -16,6 +16,53 @@ conventional-commit prefixes in the pushed commits. See
 
 - `CHANGELOG.md` — this file.
 - `CLAUDE.md` — project instructions for Claude Code.
+- `CORS_ALLOW_ORIGINS` environment variable for pointing a browser at the API
+  from an origin other than the packaged web UI.
+
+### Security
+
+- The HSL API key is no longer sent to the browser. `GET /api/config` returns an
+  empty key plus whether one is configured and where it came from; the settings
+  form leaves the stored key alone unless a new one is typed. Previously any page
+  a machine on the network visited could read the key straight out of the API.
+- A key supplied through `HSL_API_KEY` is no longer copied into `config.json` the
+  first time settings are saved. It stays in `.env` where it was put, and still
+  wins over the file at runtime.
+- The API no longer accepts requests from any origin. Cross-origin access is
+  limited to `localhost:3000` unless `CORS_ALLOW_ORIGINS` says otherwise; the
+  packaged setup is unaffected because the web UI proxies `/api/*` internally.
+- Addresses, weather place names, stop ids, and search radii are passed as
+  request parameters and GraphQL variables rather than pasted into URLs and
+  query documents, so a name containing a space or `&` can no longer break — or
+  alter — the outgoing request.
+
+### Fixed
+
+- A stop with no realtime feed is shown from the timetable instead of vanishing
+  from the screen.
+- Departures after midnight show as `00:25` rather than `24:25`.
+- A manual refresh whose trigger file cannot be deleted is now ignored for the
+  rest of the interval. It used to re-fire every second, driving the panel
+  through a continuous full refresh.
+- One unreachable stop no longer blanks the whole timetable; the remaining stops
+  render, and the connection error screen still appears when every stop fails.
+- Weather readings fall back to the most recent past forecast entry when FMI
+  returns nothing in the future, instead of the oldest one available.
+- A `display` block in `config.json` that is missing a key — or carries an extra
+  one — loads with defaults instead of taking down the display loop and every
+  API endpoint. An unreadable `config.json` falls back to defaults too.
+- Switching `epd_driver` or the weather cache duration in the web UI now takes
+  effect on the next refresh cycle, like every other setting, instead of waiting
+  for a restart.
+- Stop search works from any machine. It was addressing `localhost:8000` from the
+  browser, so it only ever worked in a browser running on the Pi itself.
+- Clearing a number field in the settings form no longer makes saving fail.
+- The error screen is drawn in black only, instead of into the black and red
+  planes at once.
+- A route alert affecting several departures is listed once rather than repeated
+  per departure.
+- The weather cache is written atomically, so an interrupted save cannot leave a
+  file that fails to load.
 
 ## [v0.0.3] — 2026-07-19
 
