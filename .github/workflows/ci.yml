@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Pinned to a full version: setup-uv publishes no moving `v9` major tag.
       - name: Install uv
@@ -52,7 +52,7 @@ jobs:
       NEXT_TELEMETRY_DISABLED: 1
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       # Matches web-ui/Dockerfile. Bump both together.
       - name: Set up Node
