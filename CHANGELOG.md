@@ -16,6 +16,46 @@ conventional-commit prefixes in the pushed commits. See
 
 - `CHANGELOG.md` — this file.
 - `CLAUDE.md` — project instructions for Claude Code.
+- CI builds the backend Docker image on every pull request, so a base-image or
+  dependency bump that no longer builds is caught before it is auto-merged.
+
+### Fixed
+
+- The backend image builds again. The Python 3.14 base image had broken every
+  backend release since August (Pillow 10.2.0 has no 3.14 wheel); the image is
+  back on Python 3.11, the version CI tests and the lockfile targets.
+- Departures around midnight: times are now computed from HSL's service day,
+  so after-midnight trips no longer vanish, sort last, or show as "24:10".
+- Saving settings in the web UI no longer reverts layout-editor changes made
+  since the page was opened.
+- Stop search in the web UI now calls the backend the page talks to, instead
+  of `localhost:8000` on the viewer's own machine.
+- Stop search handles addresses containing `&` or `#`, and weather locations
+  are URL-encoded.
+- The layout editor picks up a changed "Max Items" without a page reload, and
+  its row boxes line up with the rendered rows (they sat 5 px high).
+- A `config.json` with a partial `display` block loads instead of crashing,
+  and `HSL_API_KEY` is honoured even when there is no `config.json` yet.
+- `weather.cache_minutes` changes take effect without restarting the display.
+- The weather overlay uses the most recent forecast step when all steps are in
+  the past, and keeps the last good reading when FMI returns nothing usable.
+- The burn-in clear runs once a night, just before a redraw, instead of on
+  every refresh for the whole 03:00 hour, which left the panel blank.
+- The same HSL alert is no longer repeated for every departure of a route.
+- `python api.py` starts the dev server instead of exiting at once
+  (uvicorn's reload mode needs the app as an import string).
+- The API no longer blocks every request while one preview or HSL call is in
+  flight, and concurrent previews can't read each other's half-written image.
+- The display loop no longer reads its frame back from `pic/`, which the API
+  container's previews also write to.
+- The display finds its Waveshare driver when started from any directory.
+
+### Removed
+
+- `GET /api/layout/elements`: unused by the web UI, and its geometry had
+  drifted from what the renderer draws.
+- Render outputs (`preview.png`, `pic/*.png`) and unused boilerplate images
+  are no longer tracked.
 
 ## [v0.0.3] — 2026-07-19
 

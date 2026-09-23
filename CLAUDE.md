@@ -24,11 +24,14 @@ restarts containers labelled `com.centurylinklabs.watchtower.scope=e-display`.
   re-reads it on *every* refresh cycle (`BusScheduleDisplay.run()`), so config
   changes take effect without a restart. Do not add in-memory config state that
   survives a cycle.
-- **`config.py` owns the schema.** Adding a config field means touching four
-  places: the dataclass, `to_dict()`, `from_dict()`, and `config.example.json` —
-  plus `LayoutModel`/`ConfigModel` in `api.py` and the web UI form. Keep the
-  `from_dict()` defaults identical to the dataclass field defaults; they drifted
-  once already and were realigned in v0.0.3.
+- **`config.py` owns the schema.** Adding a config field means adding it to the
+  dataclass and `config.example.json`, plus `LayoutModel`/`ConfigModel` in
+  `api.py` and the shared types in `web-ui/lib/types.ts`. `to_dict()` and
+  `from_dict()` derive from the dataclass fields (`asdict` / `_from_partial_dict`),
+  so the dataclass default is the only default; missing keys fall back to it.
+- **Each config slice has one writer.** `PUT /api/layout` owns the layout;
+  `POST /api/config` keeps the stored layout unless one is sent, and the settings
+  form never sends it.
 - **`HSL_API_KEY` from the environment wins** over the value in `config.json`
   (`Config.from_dict`). The key is passed into the containers from `.env` via
   `docker-compose.yml`.
@@ -51,28 +54,28 @@ restarts containers labelled `com.centurylinklabs.watchtower.scope=e-display`.
 
 ## Common commands
 
-Run the API server:
+Install dependencies (uv, Python from `.python-version`):
 
 ```bash
-python api.py
+uv sync
+```
+
+Run the API server (auto-reloads):
+
+```bash
+uv run python api.py
 ```
 
 Render one frame off-Pi (mock driver, writes a preview image):
 
 ```bash
-python display.py
+uv run python display.py
 ```
 
 Run the test suite — no hardware and no network required:
 
 ```bash
-pytest
-```
-
-Install dev dependencies:
-
-```bash
-pip install -r requirements.txt -r requirements-dev.txt
+uv run pytest
 ```
 
 Frontend dev server (from `web-ui/`):
@@ -91,7 +94,8 @@ npm run lint
 
 `tests/` holds the whole suite: `test_config.py` (config round-trip and
 defaults), `test_display.py` (HSL response parsing, arrival formatting),
-`test_weather.py` (FMI response parsing). Everything is offline — HTTP calls are
+`test_weather.py` (FMI response parsing and caching), `test_api.py` (API
+handlers called directly). Everything is offline — HTTP calls are
 stubbed and the e-ink driver mocks itself out.
 
 New backend logic should come with a test here. If the logic is only reachable
@@ -132,6 +136,9 @@ call can't freeze the display loop" beats "added `timeout=` to `requests.post`".
 
 ## Conventions
 
+- The Docker image, CI and `uv.lock` all use the Python in `.python-version`.
+  Bump them together; CI builds the backend image on every PR to catch a base
+  image the locked wheels don't support.
 - Python: 4-space indent, type hints on public functions, dataclasses for data
   models, module-level docstring on every file. No formatter is enforced — match
   the surrounding style.
