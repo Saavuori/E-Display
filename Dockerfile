@@ -1,7 +1,10 @@
 # =============================================================================
 # Stage 1: Build the virtualenv
 # =============================================================================
-FROM python:3.14-slim-bookworm AS builder
+# Keep both stages on the Python in .python-version, which is what CI tests
+# and what uv.lock has wheels for. The 3.14 bump broke every backend build:
+# Pillow 10.2.0 ships no cp314 wheel and fails to compile from source.
+FROM python:3.11-slim-bookworm AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -30,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # =============================================================================
 # Stage 2: Runtime
 # =============================================================================
-FROM python:3.14-slim-bookworm
+FROM python:3.11-slim-bookworm
 
 # Version info injected at build time by CI
 ARG VERSION=dev
