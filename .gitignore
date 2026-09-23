@@ -14,3 +14,7 @@ config.json
 refresh_trigger
 weather_cache.json
 triggers/
+
+# Render outputs: written by display.py, the API preview and the mock driver.
+preview.png
+pic/*.png
