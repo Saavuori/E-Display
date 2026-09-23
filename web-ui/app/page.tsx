@@ -9,7 +9,5 @@ export default function Page() {
   // Default to empty string to use relative paths (which will be proxied by Next.js)
   const apiBase = process.env['NEXT_PUBLIC_API_URL'] || "";
 
-  console.log("Server Rendering Dashboard. API Base:", apiBase);
-
   return <Dashboard apiBase={apiBase} />;
 }

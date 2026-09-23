@@ -2,47 +2,17 @@
 
 import { useState, useEffect } from "react";
 import StopSearch from "./StopSearch";
-
-interface Route {
-    name: string;
-    mode: string;
-}
-
-interface Stop {
-    id: string;
-    name: string;
-    routes?: Route[] | null;
-}
-
-interface DisplaySettings {
-    max_items: number;
-    show_arrival_minutes_threshold: number;
-    hide_arrival_before_minutes: number;
-}
-
-interface WeatherSettings {
-    enabled: boolean;
-    location: string;
-    cache_minutes: number;
-}
-
-interface Config {
-    hsl_api_url: string;
-    hsl_api_key: string;
-    stops: Stop[];
-    refresh_interval_seconds: number;
-    display: DisplaySettings;
-    weather?: WeatherSettings;
-}
+import { getModeColor, getModeIcon } from "@/lib/transitModes";
+import type { Config, DisplaySettings, Route, WeatherSettings } from "@/lib/types";
 
 interface ConfigFormProps {
     config: Config;
     onSave: (config: Config) => void;
     saving: boolean;
-    apiBase?: string;
+    apiBase: string;
 }
 
-export default function ConfigForm({ config, onSave, saving, apiBase = "http://localhost:8000" }: ConfigFormProps) {
+export default function ConfigForm({ config, onSave, saving, apiBase }: ConfigFormProps) {
     const [formData, setFormData] = useState<Config>(config);
 
     // Track if form has changes
@@ -91,28 +61,6 @@ export default function ConfigForm({ config, onSave, saving, apiBase = "http://l
                 [field]: value,
             },
         });
-    };
-
-    const getModeIcon = (mode: string) => {
-        switch (mode) {
-            case "TRAM": return "🚊";
-            case "BUS": return "🚌";
-            case "SUBWAY": return "🚇";
-            case "RAIL": return "🚆";
-            case "FERRY": return "⛴️";
-            default: return "🚏";
-        }
-    };
-
-    const getModeColor = (mode: string) => {
-        switch (mode) {
-            case "TRAM": return "bg-green-500/20 text-green-400 border-green-500/30";
-            case "BUS": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-            case "SUBWAY": return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-            case "RAIL": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-            case "FERRY": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
-            default: return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
-        }
     };
 
     const inputClass =

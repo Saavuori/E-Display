@@ -1,13 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { getModeColor, getModeIcon } from "@/lib/transitModes";
+import type { Route } from "@/lib/types";
 
-interface Route {
-    name: string;
-    mode: string;
-}
-
-interface Stop {
+interface FoundStop {
     id: string;
     name: string;
     code: string;
@@ -21,7 +18,7 @@ interface SearchResult {
     location: string;
     coordinates: { lat: number; lon: number };
     radius: number;
-    stops: Stop[];
+    stops: FoundStop[];
     message?: string;
 }
 
@@ -65,40 +62,6 @@ export default function StopSearch({ apiBase, onAddStop, existingStopIds }: Stop
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter") {
             handleSearch();
-        }
-    };
-
-    const getModeIcon = (mode: string) => {
-        switch (mode) {
-            case "TRAM":
-                return "🚊";
-            case "BUS":
-                return "🚌";
-            case "SUBWAY":
-                return "🚇";
-            case "RAIL":
-                return "🚆";
-            case "FERRY":
-                return "⛴️";
-            default:
-                return "🚏";
-        }
-    };
-
-    const getModeColor = (mode: string) => {
-        switch (mode) {
-            case "TRAM":
-                return "bg-green-500/20 text-green-400 border-green-500/30";
-            case "BUS":
-                return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-            case "SUBWAY":
-                return "bg-orange-500/20 text-orange-400 border-orange-500/30";
-            case "RAIL":
-                return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-            case "FERRY":
-                return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
-            default:
-                return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
         }
     };
 
