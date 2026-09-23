@@ -10,29 +10,31 @@ import time
 import textwrap
 import importlib
 import traceback
-from datetime import datetime
+from datetime import date, datetime
 from dataclasses import dataclass
 from typing import Optional
 
 import requests
-from PIL import Image, ImageDraw, ImageFont
-from io import BytesIO
+from PIL import Image, ImageDraw
 
 # Import configuration from config module (loads from config.json)
 from config import (
-    BASE_DIR, PIC_DIR, ICON_DIR, FONT_DIR,
-    DISPLAY_WIDTH, DISPLAY_HEIGHT, TOP_LINE_Y, LINE_GAP,
-    COLOR_BLACK, COLOR_WHITE, COLOR_GREY,
+    BASE_DIR, PIC_DIR, FONT_DIR,
+    DISPLAY_WIDTH, DISPLAY_HEIGHT,
+    COLOR_BLACK,
     ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
-    REFRESH_TRIGGER_FILE, TRIGGER_DIR,
+    REFRESH_TRIGGER_FILE,
     Fonts, load_config, Config, LayoutConfig
 )
 
-# Weather client
-from weather import FMIWeatherClient, WeatherData, weather_client, draw_weather_icon
+from weather import WeatherData, current_weather, draw_weather_icon
 
-# Add lib folder for display driver modules
-sys.path.append('lib')
+# Add lib folder for display driver modules. Anchored to this file rather than
+# the working directory, so running display.py from another directory still
+# finds the real driver instead of failing over to (or crashing in) the mock.
+LIB_DIR = os.path.join(BASE_DIR, 'lib')
+if LIB_DIR not in sys.path:
+    sys.path.append(LIB_DIR)
 
 DEFAULT_EPD_DRIVER = "epd7in5b_V2"
 
@@ -52,11 +54,6 @@ def load_epd_driver(driver_name: str = DEFAULT_EPD_DRIVER):
         return epd_mock, True
 
 
-# Resolve the default driver at import time so modules importing PREVIEW_MODE
-# (e.g. api.py) still work. The main app re-resolves it from config.
-epd7in5b_V2, PREVIEW_MODE = load_epd_driver()
-
-
 # =============================================================================
 # DATA MODELS
 # =============================================================================
@@ -66,23 +63,29 @@ class BusArrival:
     """Represents a single bus arrival."""
     route: str
     headsign: str
-    arrival_seconds: int  # Seconds since midnight
+    arrival_time: int  # Unix timestamp (serviceDay + realtimeArrival)
     delay: int = 0  # Delay in seconds
-    
+
     @property
     def is_late(self) -> bool:
         """Check if bus is late (delay > 60 seconds)."""
         return self.delay > 60
-    
-    def minutes_until_arrival(self, current_seconds: int) -> float:
-        """Calculate minutes until this bus arrives."""
-        return (self.arrival_seconds - current_seconds) / 60
-    
+
+    def minutes_until_arrival(self, now: float) -> float:
+        """Calculate minutes until this bus arrives, *now* being a Unix timestamp."""
+        return (self.arrival_time - now) / 60
+
     def formatted_time(self) -> str:
-        """Get arrival time as HH:MM format."""
-        minutes, _ = divmod(self.arrival_seconds, 60)
-        hours, minutes = divmod(minutes, 60)
-        return f"{hours}:{minutes:02d}"
+        """Get arrival time as H:MM local time."""
+        local = datetime.fromtimestamp(self.arrival_time)
+        return f"{local.hour}:{local.minute:02d}"
+
+    def display_time(self, now: float, minutes_threshold: int) -> str:
+        """Minutes to go when closer than *minutes_threshold*, else the clock time."""
+        minutes = self.minutes_until_arrival(now)
+        if minutes < minutes_threshold:
+            return str(int(minutes))
+        return self.formatted_time()
 
 
 @dataclass
@@ -102,73 +105,86 @@ class HSLClient:
     # Network timeout (seconds) so a hung request never freezes the display loop.
     REQUEST_TIMEOUT = 15
 
-    def __init__(self, api_url: str, api_key: str):
-        self.api_url = api_url
-        self.headers = {"digitransit-subscription-key": api_key}
-    
-    def _build_query(self, stop_id: str) -> str:
-        """Build GraphQL query for a stop."""
-        return f'''
-        {{
-            stop(id:"{stop_id}") {{ 
-                stoptimesWithoutPatterns {{
-                    trip {{
-                        route {{
-                            shortName 
-                            alerts {{ 
+    # The stop id is passed as a GraphQL variable rather than pasted into the
+    # query text. realtimeArrival counts seconds from the start of serviceDay
+    # (a Unix timestamp), and a service day runs past midnight, so the two are
+    # added together to get a wall-clock time.
+    QUERY = """
+        query ($id: String!) {
+            stop(id: $id) {
+                stoptimesWithoutPatterns {
+                    trip {
+                        route {
+                            shortName
+                            alerts {
                                 alertHeaderText
                                 alertSeverityLevel
-                            }}                   
-                        }}           
-                    }}            
+                            }
+                        }
+                    }
+                    serviceDay
                     realtimeArrival
                     scheduledArrival
                     arrivalDelay
                     realtimeState
                     headsign
-                }}
-            }}
-        }}
-        '''
-    
+                }
+            }
+        }
+    """
+
+    def __init__(self, api_url: str, api_key: str):
+        self.api_url = api_url
+        self.headers = {"digitransit-subscription-key": api_key}
+
     def fetch_stop_data(self, stop_ids: list[str]) -> list[dict]:
         """Fetch arrival data for multiple stops."""
         responses = []
         for stop_id in stop_ids:
-            query = self._build_query(stop_id)
             response = requests.post(
                 url=self.api_url,
                 headers=self.headers,
-                json={"query": query},
+                json={"query": self.QUERY, "variables": {"id": stop_id}},
                 timeout=self.REQUEST_TIMEOUT,
             )
             responses.append(response.json())
         return responses
-    
-    def parse_arrivals(self, responses: list[dict], min_seconds_away: int) -> tuple[list[BusArrival], list[Alert]]:
-        """Parse API responses into BusArrival and Alert objects."""
+
+    def fetch_arrivals(self, stop_ids: list[str], min_seconds_away: int) -> tuple[list[BusArrival], list[Alert]]:
+        """Fetch and parse arrivals for *stop_ids*. Network errors propagate."""
+        return self.parse_arrivals(self.fetch_stop_data(stop_ids), min_seconds_away)
+
+    def parse_arrivals(self, responses: list[dict], min_seconds_away: int,
+                       now: Optional[float] = None) -> tuple[list[BusArrival], list[Alert]]:
+        """Parse API responses into BusArrival and Alert objects.
+
+        Every departure of a route carries that route's alerts, so alerts are
+        de-duplicated by their text.
+        """
         arrivals = []
         alerts = []
-        current_seconds = self._seconds_since_midnight()
-        
+        seen_alerts = set()
+        if now is None:
+            now = time.time()
+
         for stop_response in responses:
             stop_data = self._get_stop_times(stop_response)
             if not stop_data:
                 continue
-                
+
             for bus in stop_data:
-                # Extract alerts
-                alerts.extend(self._extract_alerts(bus))
-                
-                # Extract arrival info
-                arrival = self._extract_arrival(bus, current_seconds, min_seconds_away)
+                for alert in self._extract_alerts(bus):
+                    if alert.header_text not in seen_alerts:
+                        seen_alerts.add(alert.header_text)
+                        alerts.append(alert)
+
+                arrival = self._extract_arrival(bus, now, min_seconds_away)
                 if arrival:
                     arrivals.append(arrival)
-        
-        # Sort by arrival time
-        arrivals.sort(key=lambda x: x.arrival_seconds)
+
+        arrivals.sort(key=lambda x: x.arrival_time)
         return arrivals, alerts
-    
+
     def _get_stop_times(self, stop_response: dict) -> Optional[list]:
         """Safely extract stop times from response."""
         try:
@@ -176,7 +192,7 @@ class HSLClient:
         except (KeyError, TypeError) as e:
             print(f"Error extracting stop times: {e}")
             return None
-    
+
     def _extract_alerts(self, bus_data: dict) -> list[Alert]:
         """Extract alerts from bus data."""
         alerts = []
@@ -191,32 +207,25 @@ class HSLClient:
         except (KeyError, TypeError):
             pass
         return alerts
-    
-    def _extract_arrival(self, bus_data: dict, current_seconds: int, min_seconds_away: int) -> Optional[BusArrival]:
+
+    def _extract_arrival(self, bus_data: dict, now: float, min_seconds_away: int) -> Optional[BusArrival]:
         """Extract arrival info from bus data if it meets criteria."""
         try:
-            realtime_arrival = bus_data["realtimeArrival"]
-            
+            arrival_time = bus_data["serviceDay"] + bus_data["realtimeArrival"]
+
             # Skip buses arriving too soon
-            if realtime_arrival - current_seconds <= min_seconds_away:
+            if arrival_time - now <= min_seconds_away:
                 return None
-            
+
             return BusArrival(
                 route=bus_data["trip"]["route"]["shortName"],
                 headsign=bus_data["headsign"],
-                arrival_seconds=realtime_arrival,
+                arrival_time=arrival_time,
                 delay=bus_data.get("arrivalDelay", 0)
             )
         except (KeyError, TypeError) as e:
             print(f"Error extracting arrival: {e}")
             return None
-    
-    @staticmethod
-    def _seconds_since_midnight() -> int:
-        """Calculate seconds elapsed since midnight."""
-        now = datetime.now()
-        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        return int((now - midnight).total_seconds())
 
 
 # =============================================================================
@@ -225,7 +234,7 @@ class HSLClient:
 
 class DisplayRenderer:
     """Handles rendering content to the e-paper display."""
-    
+
     def __init__(self, epd, fonts: Fonts, pic_dir: str, layout: LayoutConfig, max_items: int = 5, show_minutes_threshold: int = 10):
         self.epd = epd
         self.fonts = fonts
@@ -233,22 +242,42 @@ class DisplayRenderer:
         self.layout = layout
         self.max_items = max_items
         self.show_minutes_threshold = show_minutes_threshold
-        
+
+    @classmethod
+    def from_config(cls, epd, config: Config, pic_dir: str = PIC_DIR) -> 'DisplayRenderer':
+        """Build a renderer for *config*."""
+        renderer = cls(epd, None, pic_dir, config.layout)
+        renderer.apply_config(config)
+        return renderer
+
+    def apply_config(self, config: Config):
+        """Pick up layout and display settings from a (re)loaded config."""
+        self.fonts = Fonts(FONT_DIR, layout=config.layout)
+        self.layout = config.layout
+        self.max_items = config.display.max_items
+        self.show_minutes_threshold = config.display.show_arrival_minutes_threshold
+
     def initialize(self):
         """Initialize and clear the display."""
         print('Initializing and clearing screen.')
         self.epd.init()
         self.epd.Clear()
-    
-    def render_schedule(self, arrivals: list[BusArrival], alerts: list[Alert], weather: Optional[WeatherData] = None) -> tuple[str, str]:
-        """Render the bus schedule and return paths to output images."""
+
+    def render_schedule(self, arrivals: list[BusArrival], alerts: list[Alert],
+                        weather: Optional[WeatherData] = None) -> tuple[Image.Image, Image.Image]:
+        """Render the bus schedule into black and red layers.
+
+        Copies are saved to pic/ for inspection, but the images themselves are
+        returned: pic/ is shared with the API container, which renders previews
+        into the same files, so reading them back could pick up its render.
+        """
         # Create blank white images instead of loading template file
         template_bw = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
         template_red = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
-        
+
         draw_bw = ImageDraw.Draw(template_bw)
         draw_red = ImageDraw.Draw(template_red)
-        
+
         self._draw_grid_lines(draw_red)
         self._draw_clock(draw_bw)
         self._draw_temperature(draw_bw, weather)
@@ -256,73 +285,64 @@ class DisplayRenderer:
         self._draw_headers(draw_bw)
         self._draw_arrivals(draw_bw, draw_red, arrivals)
         self._draw_alerts(draw_bw, alerts)
-        
-        # Save output images
-        output_bw = os.path.join(self.pic_dir, 'screen_output_bw.png')
-        output_red = os.path.join(self.pic_dir, 'screen_output_red.png')
-        
-        template_bw.save(output_bw)
-        template_red.save(output_red)
-        
-        template_bw.close()
-        template_red.close()
-        
-        return output_bw, output_red
-    
-    def render_error(self, error_source: str) -> str:
-        """Render an error message and return path to output image."""
+
+        template_bw.save(os.path.join(self.pic_dir, 'screen_output_bw.png'))
+        template_red.save(os.path.join(self.pic_dir, 'screen_output_red.png'))
+
+        return template_bw, template_red
+
+    def render_error(self, error_source: str) -> Image.Image:
+        """Render an error message image."""
         print(f'Error in the {error_source} request.')
-        
+
         error_image = Image.new('1', (self.epd.width, self.epd.height), 255)
         draw = ImageDraw.Draw(error_image)
-        
+
         draw.text((100, 150), f'{error_source} ERROR', font=self.fonts.error, fill=COLOR_BLACK)
-        draw.text((100, 300), 'Retrying in 30 seconds', font=self.fonts.small, fill=COLOR_BLACK)
-        
+        draw.text((100, 300), f'Retrying in {ERROR_RETRY_SECONDS} seconds', font=self.fonts.small, fill=COLOR_BLACK)
+
         current_time = datetime.now().strftime('%H:%M')
         draw.text((300, 365), f'Last Refresh: {current_time}', font=self.fonts.error, fill=COLOR_BLACK)
-        
-        output_path = os.path.join(self.pic_dir, 'error.png')
-        error_image.save(output_path)
-        error_image.close()
-        
-        return output_path
-    
-    def write_to_screen(self, image_bw_path: str, image_red_path: str):
-        """Write images to the e-paper display."""
+
+        error_image.save(os.path.join(self.pic_dir, 'error.png'))
+
+        return error_image
+
+    def write_to_screen(self, screen_bw: Image.Image, screen_red: Image.Image):
+        """Write black and red layers to the e-paper display."""
         print('Writing to screen.')
-        
+
         image_bw = Image.new('1', (self.epd.width, self.epd.height), 255)
         image_red = Image.new('1', (self.epd.width, self.epd.height), 255)
-        
-        screen_bw = Image.open(image_bw_path)
-        screen_red = Image.open(image_red_path)
-        
+
         image_bw.paste(screen_bw, (0, 0))
         image_red.paste(screen_red, (0, 0))
-        
+
         self.epd.init()
         self.epd.display(self.epd.getbuffer(image_bw), self.epd.getbuffer(image_red))
         time.sleep(2)
         self.epd.sleep()
-    
+
     def clear_screen(self):
         """Clear the display to avoid burn-in."""
         print('Clearing screen to avoid burn-in.')
         self.epd.init()
         self.epd.Clear()
-    
+
+    @staticmethod
+    def _temperature_text(weather: WeatherData) -> str:
+        return f"{weather.temperature:+.1f}°C"
+
     def _draw_temperature(self, draw: ImageDraw, weather: Optional[WeatherData]):
         """Draw current temperature right-aligned in the top-right area beside the clock."""
         if weather is None:
             return
-        temp_text = f"{weather.temperature:+.1f}\u00b0C"
         draw.text(
             (self.layout.weather_x, self.layout.weather_y),
-            temp_text,
+            self._temperature_text(weather),
             font=self.fonts.header,
             fill=COLOR_BLACK,
-            anchor="ra",  # right-aligned baseline
+            anchor="ra",  # right edge, top of ascender
         )
 
     def _draw_weather_icon(self, draw: ImageDraw, weather: Optional[WeatherData]):
@@ -330,14 +350,9 @@ class DisplayRenderer:
         if weather is None:
             return
         icon_size = 46  # pixels — fits inside the 90px top zone
-        temp_text = f"{weather.temperature:+.1f}\u00b0C"
         # Measure temperature text width for precise icon placement
-        try:
-            bbox = draw.textbbox((0, 0), temp_text, font=self.fonts.header, anchor="la")
-            text_width = bbox[2] - bbox[0]
-        except Exception:
-            # Fallback estimate: average ~0.65× font size per character
-            text_width = len(temp_text) * int(self.layout.font_header * 0.65)
+        bbox = draw.textbbox((0, 0), self._temperature_text(weather), font=self.fonts.header, anchor="la")
+        text_width = bbox[2] - bbox[0]
         icon_x = self.layout.weather_x - text_width - 10 - icon_size
         icon_y = self.layout.weather_y
         draw_weather_icon(draw, icon_x, icon_y, icon_size, weather.symbol_code)
@@ -349,7 +364,7 @@ class DisplayRenderer:
             y = self.layout.top_line_y + (i + 1) * self.layout.line_gap
             for x in range(0, DISPLAY_WIDTH, 6):
                 draw.line([(x, y), (x + 2, y)], fill=COLOR_BLACK, width=4)
-        
+
         # Top and bottom solid lines
         draw.line([(0, self.layout.top_line_y), (DISPLAY_WIDTH, self.layout.top_line_y)], fill=COLOR_BLACK, width=4)
         draw.line(
@@ -357,12 +372,12 @@ class DisplayRenderer:
             fill=COLOR_BLACK,
             width=4
         )
-    
+
     def _draw_clock(self, draw: ImageDraw):
         """Draw the current time."""
         current_time = datetime.now().strftime('%H:%M')
         draw.text((self.layout.clock_x, self.layout.clock_y), current_time, font=self.fonts.clock, fill=COLOR_BLACK, anchor="mt")
-    
+
     def _draw_headers(self, draw: ImageDraw):
         """Draw the column headers."""
         # Use route_col_x for the Route header
@@ -372,62 +387,36 @@ class DisplayRenderer:
 
     def _draw_arrivals(self, draw_bw: ImageDraw, draw_red: ImageDraw, arrivals: list[BusArrival]):
         """Draw the list of bus arrivals."""
-        current_seconds = HSLClient._seconds_since_midnight()
-        
+        now = time.time()
+
         for i, bus in enumerate(arrivals[:self.max_items]):
-            # Start below the top line
-            # Items are spaced by line_gap
-            # We add a small padding (e.g. 5px) from the line? 
-            # layout.top_line_y is the Y of the line ABOVE the first item.
-            # So item 0 is at top_line_y + padding?
-            # Looking at `_draw_grid_lines`:
-            # top line is at top_line_y
-            # next line is top_line_y + line_gap
-            # So the space is between top_line_y and top_line_y + line_gap
-            # Text should be vertically centered or aligned nicely.
-            
-            # Let's align text baseline.
-            # If line_gap is 60.
-            # Font numbers is 60. That fills the gap tightly.
-            
+            # Row i sits between the grid line at top_line_y + i * line_gap
+            # and the next one down.
             y_pos = self.layout.top_line_y + (i * self.layout.line_gap)
-            
-            
-            # Route number
+
             draw_bw.text((self.layout.route_col_x, y_pos), bus.route, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="la")
-            
-            # Destination (smaller font, maybe offset Y slightly to center?)
-            # Font text is 30.
-            # 60 (gap) - 30 (font) = 30. / 2 = 15 offset?
+
+            # Destination uses the smaller text font, nudged down to sit mid-row
             draw_bw.text((self.layout.destination_col_x, y_pos + 15), bus.headsign, font=self.fonts.text, fill=COLOR_BLACK, anchor="la")
-            
-            # Time
-            minutes = bus.minutes_until_arrival(current_seconds)
-            if minutes < self.show_minutes_threshold:
-                time_text = str(int(minutes))
-            else:
-                time_text = bus.formatted_time()
-                
+
             # Draw time in red if late, otherwise black
-            if bus.is_late:
-                draw_red.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
-            else:
-                draw_bw.text((self.layout.time_col_x, y_pos), time_text, font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
-    
+            draw = draw_red if bus.is_late else draw_bw
+            draw.text((self.layout.time_col_x, y_pos), bus.display_time(now, self.show_minutes_threshold),
+                      font=self.fonts.numbers, fill=COLOR_BLACK, anchor="ra")
+
     def _draw_alerts(self, draw: ImageDraw, alerts: list[Alert]):
         """Draw transit alerts if any."""
         if not alerts:
             return
-        
-        # Calculate centered X start position
-        # Default width is 780 if not set (fallback)
-        alert_width = getattr(self.layout, 'alert_width', 780)
+
+        # Centre the alert area horizontally
+        alert_width = self.layout.alert_width
         x_start = (DISPLAY_WIDTH - alert_width) // 2
-        
+
         # Estimate characters per line based on width and font size (approx 0.6 aspect ratio)
         char_width = self.layout.font_text * 0.5  # Conservative estimate
         chars_per_line = int(alert_width / char_width)
-        
+
         lines = textwrap.wrap(alerts[0].header_text, width=chars_per_line)
         for idx, line in enumerate(lines):
             draw.text((x_start + 10, self.layout.alert_y + idx * 30), line, font=self.fonts.text, fill=COLOR_BLACK, anchor="la")
@@ -439,57 +428,46 @@ class DisplayRenderer:
 
 class BusScheduleDisplay:
     """Main application class for the bus schedule display."""
-    
+
     def __init__(self):
-        # Load full config
         self.config = load_config()
 
         # Resolve the display driver from config (falls back to mock off-Pi)
         driver_module, self.preview_mode = load_epd_driver(self.config.epd_driver)
         self.epd = driver_module.EPD()
-        
-        # Initialize fonts with layout config
-        self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
-        
-        # Initialize renderer with layout config
-        self.renderer = DisplayRenderer(
-            self.epd, 
-            self.fonts, 
-            PIC_DIR, 
-            layout=self.config.layout,
-            max_items=self.config.display.max_items,
-            show_minutes_threshold=self.config.display.show_arrival_minutes_threshold
-        )
-        
+
+        self.renderer = DisplayRenderer.from_config(self.epd, self.config)
         self.hsl_client = HSLClient(self.config.hsl_api_url, self.config.hsl_api_key)
-        
-        # Configure the shared weather client from loaded config
-        weather_client._cache_minutes = self.config.weather.cache_minutes
-    
+        self._last_clear: Optional[date] = None
+
+    def _apply_config(self):
+        """Push a freshly loaded config into the renderer and HSL client."""
+        self.renderer.apply_config(self.config)
+        self.hsl_client.api_url = self.config.hsl_api_url
+        self.hsl_client.headers = {"digitransit-subscription-key": self.config.hsl_api_key}
+
+    def _clear_due(self, now: datetime) -> bool:
+        """True once per day, on the first cycle inside SCREEN_CLEAR_HOUR."""
+        return now.hour == SCREEN_CLEAR_HOUR and self._last_clear != now.date()
+
     def run(self):
         """Main application loop."""
         self.renderer.initialize()
-        
+
         while True:
             # Reload configuration to pick up changes
             try:
-                new_config = load_config()
-                self.config = new_config
-                
-                # Update dependent components
-                self.fonts = Fonts(FONT_DIR, layout=self.config.layout)
-                self.renderer.fonts = self.fonts
-                self.renderer.layout = self.config.layout
-                self.renderer.max_items = self.config.display.max_items
-                self.renderer.show_minutes_threshold = self.config.display.show_arrival_minutes_threshold
-                
-                # Update HSL client keys if changed
-                self.hsl_client.api_url = self.config.hsl_api_url
-                self.hsl_client.headers = {"digitransit-subscription-key": self.config.hsl_api_key}
-                
+                self.config = load_config()
+                self._apply_config()
             except Exception as e:
                 print(f"Error reloading config: {e}")
 
+            # Clear once a day to avoid burn-in, right before a redraw so the
+            # panel is only blank for the length of one refresh.
+            now = datetime.now()
+            if not self.preview_mode and self._clear_due(now):
+                self.renderer.clear_screen()
+                self._last_clear = now.date()
 
             try:
                 self._update_display()
@@ -497,71 +475,52 @@ class BusScheduleDisplay:
                 print(f"Unexpected error: {e}")
                 traceback.print_exc()
                 self._handle_error("UNEXPECTED")
-            
+
             # In preview mode, just render once and exit
             if self.preview_mode:
                 print("\n[PREVIEW MODE] Rendered once. Exiting.")
                 break
-            
-            # Clear screen at designated hour to avoid burn-in
-            if datetime.now().hour == SCREEN_CLEAR_HOUR:
-                self.renderer.clear_screen()
-            
+
             # Wait for next refresh, but check for manual trigger every second
             refresh_interval = self.config.refresh_interval_seconds
             print(f"Sleeping for {refresh_interval} seconds...", flush=True)
-            
+
             for i in range(refresh_interval):
                 # Check for manual refresh trigger from web UI
                 if os.path.exists(REFRESH_TRIGGER_FILE):
                     print("Manual refresh triggered from web UI", flush=True)
                     try:
                         os.remove(REFRESH_TRIGGER_FILE)
-                        break  # Only break if we successfully removed the file OR decided to proceed
                     except OSError as e:
+                        # Refresh anyway; the next cycle retries the removal.
                         print(f"ERROR: Could not remove trigger file: {e}", flush=True)
-                        # If we can't remove it, we shouldn't infinitely loop. 
-                        # We'll ignore the trigger this time and continue sleeping to prevent rapid cycling.
-                        # OR we break, but then it will trigger again immediately.
-                        # Safer to ignore it for now or try to clear it later?
-                        # Let's break, but users will see rapid refresh. But at least we log the error.
-                        break
-                
+                    break
+
                 time.sleep(1)
-                
-                # Optional: print countdown every minute
+
+                # Print a countdown every minute
                 if (refresh_interval - i) % 60 == 0:
                     print(f"Time to next refresh: {refresh_interval - i}s", flush=True)
-    
+
     def _update_display(self):
         """Fetch data and update the display."""
-        # Fetch weather (cached — won't call FMI on every 5-min cycle)
-        current_weather = None
-        if self.config.weather.enabled:
-            try:
-                current_weather = weather_client.fetch_current(self.config.weather.location)
-            except Exception as exc:
-                print(f"Weather fetch failed, continuing without: {exc}")
+        # Weather is cached, so this won't call FMI on every cycle
+        weather = current_weather(self.config.weather)
 
-        # Attempt to connect to HSL API
         try:
             print('Attempting to connect to HSL API.', flush=True)
             stop_ids = [s.id for s in self.config.stops]
-            responses = self.hsl_client.fetch_stop_data(stop_ids)
+            min_seconds = self.config.display.hide_arrival_before_minutes * 60
+            arrivals, alerts = self.hsl_client.fetch_arrivals(stop_ids, min_seconds)
             print('Connection to API successful.', flush=True)
         except requests.RequestException as e:
             print(f'Connection error: {e}', flush=True)
             self._handle_error("CONNECTION")
             return
-        
-        # Parse the data
-        min_seconds = self.config.display.hide_arrival_before_minutes * 60
-        arrivals, alerts = self.hsl_client.parse_arrivals(responses, min_seconds)
-        
-        # Render and display
-        output_bw, output_red = self.renderer.render_schedule(arrivals, alerts, weather=current_weather)
-        self.renderer.write_to_screen(output_bw, output_red)
-    
+
+        image_bw, image_red = self.renderer.render_schedule(arrivals, alerts, weather=weather)
+        self.renderer.write_to_screen(image_bw, image_red)
+
     def _handle_error(self, error_type: str):
         """Handle and display an error."""
         error_image = self.renderer.render_error(error_type)
