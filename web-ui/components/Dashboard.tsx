@@ -5,48 +5,7 @@ import ConfigForm from "@/components/ConfigForm";
 import DisplayPreview from "@/components/DisplayPreview";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import LayoutEditor from "@/components/LayoutEditor";
-
-interface Stop {
-    id: string;
-    name: string;
-}
-
-interface DisplaySettings {
-    max_items: number;
-    show_arrival_minutes_threshold: number;
-    hide_arrival_before_minutes: number;
-}
-
-interface LayoutConfig {
-    top_line_y: number;
-    line_gap: number;
-    clock_x: number;
-    clock_y: number;
-    route_col_x: number;
-    destination_col_x: number;
-    time_col_x: number;
-    header_y: number;
-    alert_y: number;
-    font_clock: number;
-    font_numbers: number;
-    font_text: number;
-    font_header: number;
-    font_small: number;
-}
-
-interface Config {
-    hsl_api_url: string;
-    hsl_api_key: string;
-    stops: Stop[];
-    refresh_interval_seconds: number;
-    display: DisplaySettings;
-    layout?: LayoutConfig;
-    weather?: {
-        enabled: boolean;
-        location: string;
-        cache_minutes: number;
-    };
-}
+import type { Config } from "@/lib/types";
 
 interface WeatherStatus {
     enabled: boolean;
@@ -123,10 +82,15 @@ export default function Dashboard({ apiBase }: DashboardProps) {
     const handleSave = async (newConfig: Config) => {
         setSaving(true);
         try {
+            // GET /api/config also returns the layout. Leave it out of the save:
+            // the copy loaded with the page would overwrite anything saved in
+            // the layout editor since, and the backend keeps the stored one.
+            const settings: Record<string, unknown> = { ...newConfig };
+            delete settings.layout;
             const res = await fetch(`${apiBase}/api/config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newConfig),
+                body: JSON.stringify(settings),
             });
             if (!res.ok) throw new Error("Failed to save config");
             setConfig(newConfig);
@@ -206,11 +170,6 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                 </div>
             </header>
 
-            {/* Debug Info */}
-            <div className="mb-4 text-xs text-zinc-600 font-mono text-center">
-                API Target: {apiBase}
-            </div>
-
             {/* Error Banner */}
             {error && (
                 <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400">
@@ -240,6 +199,7 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                                     config={config}
                                     onSave={handleSave}
                                     saving={saving}
+                                    apiBase={apiBase}
                                 />
                             )}
                         </div>
@@ -275,7 +235,11 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                     </svg>
                 }
             >
-                <LayoutEditor apiBase={apiBase} onLayoutSaved={handleLayoutSaved} />
+                <LayoutEditor
+                    apiBase={apiBase}
+                    maxItems={config?.display.max_items ?? 5}
+                    onLayoutSaved={handleLayoutSaved}
+                />
             </CollapsibleSection>
 
             {/* Version Badge Footer */}

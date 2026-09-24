@@ -1,28 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, MouseEvent } from "react";
-
-interface LayoutConfig {
-    top_line_y: number;
-    line_gap: number;
-    clock_x: number;
-    clock_y: number;
-    route_col_x: number;
-    route_col_width: number;
-    destination_col_x: number;
-    time_col_x: number;
-    time_col_width: number;
-    header_y: number;
-    alert_y: number;
-    alert_width: number;
-    font_clock: number;
-    font_numbers: number;
-    font_text: number;
-    font_header: number;
-    font_small: number;
-    weather_x?: number;
-    weather_y?: number;
-}
+import type { ArrivalsData, LayoutConfig } from "@/lib/types";
 
 interface LayoutElement {
     id: string;
@@ -36,22 +15,6 @@ interface LayoutElement {
     font?: string;
     sample?: string;
     fontSize?: number;
-}
-
-interface Arrival {
-    route: string;
-    destination: string;
-    time: string;
-}
-
-interface Alert {
-    header: string;
-    severity: string;
-}
-
-interface ArrivalsData {
-    arrivals: Arrival[];
-    alerts: Alert[];
 }
 
 interface LayoutPreviewProps {
@@ -80,15 +43,11 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
     // Helper to estimate text width
     const measure = (text: string, size: number) => Math.max(size, text.length * size * 0.6); // 0.6 aspect ratio approx
 
-    // Standard widths for different content types (approximate character widths)
-    // Standard widths for different content types (approximate character widths)
-    // ROUTE_WIDTH and TIME_WIDTH are now in layout config
-
     // Get alerts from data if available
     const alertsText = arrivalsData?.alerts?.map(a => a.header).join(" | ") || "Alerts Area";
 
-    const weatherX = layout.weather_x !== undefined ? layout.weather_x : 790;
-    const weatherY = layout.weather_y !== undefined ? layout.weather_y : 15;
+    const weatherX = layout.weather_x;
+    const weatherY = layout.weather_y;
     const tempText = "+12.5°C";
     const tempWidth = measure(tempText, layout.font_header);
     const tempHeight = layout.font_header;
@@ -169,13 +128,13 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
             name: "H: Time",
             type: "text",
             // Right-aligned (ra)
-            x: calcX(layout.time_col_x, measure("Aika", layout.font_header), "ra"),
+            x: calcX(layout.time_col_x, measure("Aika/min", layout.font_header), "ra"),
             y: layout.header_y,
-            width: measure("Aika", layout.font_header),
+            width: measure("Aika/min", layout.font_header),
             height: layout.font_header,
             anchor: "ra",
             font: "header",
-            sample: "Aika",
+            sample: "Aika/min",
             fontSize: layout.font_header
         },
         {
@@ -210,8 +169,8 @@ function generateElements(layout: LayoutConfig, maxItems: number, arrivalsData?:
 
     // Add arrival row elements
     for (let i = 0; i < maxItems; i++) {
-        // Y position logic matches display.py: top_line_y - 5 + idx * line_gap
-        const y_base = layout.top_line_y - 5 + i * layout.line_gap;
+        // Matches DisplayRenderer._draw_arrivals: top_line_y + idx * line_gap
+        const y_base = layout.top_line_y + i * layout.line_gap;
 
         // Get data for this row if available
         const arrival = arrivalsData?.arrivals?.[i];

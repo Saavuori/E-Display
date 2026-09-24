@@ -2,28 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import LayoutPreview from "./LayoutPreview";
-
-interface LayoutConfig {
-    top_line_y: number;
-    line_gap: number;
-    clock_x: number;
-    clock_y: number;
-    route_col_x: number;
-    route_col_width: number;
-    destination_col_x: number;
-    time_col_x: number;
-    time_col_width: number;
-    header_y: number;
-    alert_y: number;
-    alert_width: number;
-    font_clock: number;
-    font_numbers: number;
-    font_text: number;
-    font_header: number;
-    font_small: number;
-    weather_x: number;
-    weather_y: number;
-}
+import type { ArrivalsData, LayoutConfig } from "@/lib/types";
 
 const DEFAULT_LAYOUT: LayoutConfig = {
     top_line_y: 90,
@@ -49,6 +28,9 @@ const DEFAULT_LAYOUT: LayoutConfig = {
 
 interface LayoutEditorProps {
     apiBase: string;
+    // Comes from the dashboard's config, so a saved max_items shows up here
+    // without a page reload.
+    maxItems: number;
     onLayoutSaved?: () => void;
 }
 
@@ -60,56 +42,31 @@ interface SliderConfig {
     step?: number;
 }
 
-interface Arrival {
-    route: string;
-    destination: string;
-    time: string;
-}
-
-interface Alert {
-    header: string;
-    severity: string;
-}
-
-interface ArrivalsData {
-    arrivals: Arrival[];
-    alerts: Alert[];
-}
-
-export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorProps) {
+export default function LayoutEditor({ apiBase, maxItems, onLayoutSaved }: LayoutEditorProps) {
     const [layout, setLayout] = useState<LayoutConfig>(DEFAULT_LAYOUT);
     const [originalLayout, setOriginalLayout] = useState<LayoutConfig>(DEFAULT_LAYOUT);
-    const [maxItems, setMaxItems] = useState(5);
     const [arrivalsData, setArrivalsData] = useState<ArrivalsData | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [selectedElement, setSelectedElement] = useState<string | null>(null);
-    const [hasChanges, setHasChanges] = useState(false);
 
     const fetchLayout = useCallback(async () => {
         setLoading(true);
         try {
-            // Fetch layout, config and arrivals
-            const [layoutRes, configRes, arrivalsRes] = await Promise.all([
+            const [layoutRes, arrivalsRes] = await Promise.all([
                 fetch(`${apiBase}/api/layout`),
-                fetch(`${apiBase}/api/config`),
                 fetch(`${apiBase}/api/arrivals`)
             ]);
 
-            if (!layoutRes.ok || !configRes.ok) throw new Error("Failed to fetch");
+            if (!layoutRes.ok) throw new Error("Failed to fetch");
 
             const layoutData = await layoutRes.json();
-            const configData = await configRes.json();
-            const arrivalsData = await arrivalsRes.json();
-
             setLayout(layoutData);
             setOriginalLayout(layoutData);
-            setMaxItems(configData.display?.max_items || 5);
-            setArrivalsData(arrivalsRes.ok ? arrivalsData : null);
+            setArrivalsData(arrivalsRes.ok ? await arrivalsRes.json() : null);
 
             setError(null);
-            setHasChanges(false);
         } catch (err) {
             setError("Could not load layout configuration");
             console.error(err);
@@ -122,13 +79,9 @@ export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorPro
         fetchLayout();
     }, [fetchLayout]);
 
-    useEffect(() => {
-        // Check if layout has changed from original
-        const changed = Object.keys(layout).some(
-            (key) => layout[key as keyof LayoutConfig] !== originalLayout[key as keyof LayoutConfig]
-        );
-        setHasChanges(changed);
-    }, [layout, originalLayout]);
+    const hasChanges = (Object.keys(layout) as (keyof LayoutConfig)[]).some(
+        (key) => layout[key] !== originalLayout[key]
+    );
 
     const handleChange = (key: keyof LayoutConfig, value: number) => {
         setLayout((prev) => ({ ...prev, [key]: value }));
@@ -174,7 +127,6 @@ export default function LayoutEditor({ apiBase, onLayoutSaved }: LayoutEditorPro
             });
             if (!res.ok) throw new Error("Failed to save layout");
             setOriginalLayout(layout);
-            setHasChanges(false);
             setError(null);
             if (onLayoutSaved) onLayoutSaved();
         } catch (err) {

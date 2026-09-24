@@ -13,12 +13,13 @@ import os
 import math
 import re
 import time
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests
+
+from config import WeatherConfig
 
 
 # =============================================================================
@@ -263,13 +264,14 @@ class FMIWeatherClient:
     called on every bus-schedule refresh cycle.
     """
 
-    FMI_WFS_URL = (
-        "https://opendata.fmi.fi/wfs"
-        "?service=WFS&version=2.0.0&request=getFeature"
-        "&storedquery_id=fmi::forecast::harmonie::surface::point::simple"
-        "&place={place}&endtime={endtime}"
-        "&parameters=Temperature,WeatherSymbol3"
-    )
+    FMI_WFS_URL = "https://opendata.fmi.fi/wfs"
+    FMI_QUERY = {
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "getFeature",
+        "storedquery_id": "fmi::forecast::harmonie::surface::point::simple",
+        "parameters": "Temperature,WeatherSymbol3",
+    }
 
     def __init__(self, cache_minutes: int = 30):
         self._cache_minutes = cache_minutes
@@ -313,48 +315,49 @@ class FMIWeatherClient:
     # Public API
     # ------------------------------------------------------------------
 
-    def fetch_current(self, place: str) -> Optional[WeatherData]:
+    def fetch_current(self, place: str, cache_minutes: Optional[int] = None) -> Optional[WeatherData]:
         """
         Return a WeatherData for *place*, using the cache when still valid.
 
+        *cache_minutes* overrides the client's default TTL for this call, so a
+        changed `weather.cache_minutes` takes effect on the next cycle.
         Returns None on any error so callers can degrade gracefully.
         """
         key = place.lower()
 
         # Return cached value if still fresh
         cached = self._cache.get(key)
-        if cached and self._is_fresh(cached):
+        if cached and self._is_fresh(cached, cache_minutes):
             return cached
 
         try:
             data = self._fetch_from_fmi(place)
-            if data:
-                self._cache[key] = data
-                self._save_cache()
-            return data
         except Exception as exc:
             print(f"[weather] FMI fetch failed for '{place}': {exc}")
+            data = None
+        if data is None:
             # Return stale cache rather than nothing
             return cached
-
-    def invalidate(self, place: str) -> None:
-        """Force the next fetch to go to FMI (e.g. after a config change)."""
-        self._cache.pop(place.lower(), None)
+        self._cache[key] = data
         self._save_cache()
+        return data
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _is_fresh(self, data: WeatherData) -> bool:
+    def _is_fresh(self, data: WeatherData, cache_minutes: Optional[int] = None) -> bool:
+        if cache_minutes is None:
+            cache_minutes = self._cache_minutes
         age_seconds = time.time() - data.fetched_at
-        return age_seconds < self._cache_minutes * 60
+        return age_seconds < cache_minutes * 60
 
     def _fetch_from_fmi(self, place: str) -> Optional[WeatherData]:
         endtime = (datetime.now(timezone.utc) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        url = self.FMI_WFS_URL.format(place=place, endtime=endtime)
+        # params= URL-encodes the place, so names with spaces or '&' survive.
+        params = {**self.FMI_QUERY, "place": place, "endtime": endtime}
 
-        response = requests.get(url, timeout=15)
+        response = requests.get(self.FMI_WFS_URL, params=params, timeout=15)
         response.raise_for_status()
 
         return self._parse_response(response.text, place)
@@ -364,7 +367,8 @@ class FMIWeatherClient:
         Parse the BsWfs simple-format XML response.
 
         We group all (Time, ParameterName, ParameterValue) triples by timestamp
-        and pick the entry whose timestamp is nearest to *now* (rounding forward).
+        and pick the first timestamp at or after *now*, or the most recent one
+        if every timestamp is in the past.
         """
         member_pattern = re.compile(
             r'<BsWfs:Time>([^<]+)</BsWfs:Time>\s*'
@@ -395,26 +399,19 @@ class FMIWeatherClient:
             print(f"[weather] No data parsed from FMI response for '{place}'")
             return None
 
-        # Find the entry whose timestamp is closest to now (first future timestamp,
-        # or the last past one if all are in the past).
         now_utc = datetime.now(timezone.utc)
-        best_time_str: Optional[str] = None
-        best_delta: Optional[timedelta] = None
-
-        for ts in sorted(data_by_time.keys()):
+        timestamps = []
+        for ts in data_by_time:
             try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                timestamps.append((datetime.fromisoformat(ts.replace("Z", "+00:00")), ts))
             except ValueError:
                 continue
-            delta = dt - now_utc
-            # Prefer the first timestamp that is in the future (or least past)
-            if best_delta is None or (delta > timedelta(0) and (best_delta < timedelta(0) or delta < best_delta)):
-                best_delta = delta
-                best_time_str = ts
-
-        if best_time_str is None:
-            # Fall back to the most recent entry
-            best_time_str = sorted(data_by_time.keys())[-1]
+        if not timestamps:
+            print(f"[weather] No parseable timestamps in FMI response for '{place}'")
+            return None
+        timestamps.sort()
+        upcoming = [ts for dt, ts in timestamps if dt >= now_utc]
+        best_time_str = upcoming[0] if upcoming else timestamps[-1][1]
 
         params = data_by_time[best_time_str]
         temperature = params.get("Temperature")
@@ -439,6 +436,17 @@ class FMIWeatherClient:
 # =============================================================================
 
 # A single shared instance reused across the API and display loop.
-# Cache TTL is initialised with the default; reconfigure via
-# `weather_client._cache_minutes = config.weather.cache_minutes`.
+# The TTL passed here is only the default; callers pass the configured one.
 weather_client = FMIWeatherClient(cache_minutes=30)
+
+
+def current_weather(settings: WeatherConfig) -> Optional[WeatherData]:
+    """Current weather for the configured location, or None when the overlay
+    is disabled or FMI is unreachable (the display carries on without it)."""
+    if not settings.enabled:
+        return None
+    try:
+        return weather_client.fetch_current(settings.location, settings.cache_minutes)
+    except Exception as exc:
+        print(f"[weather] Weather fetch failed, continuing without: {exc}")
+        return None

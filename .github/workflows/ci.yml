@@ -41,6 +41,30 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+  # ── Backend image ─────────────────────────────────────────────────────────
+  # docker-build.yml only runs after a merge to main, so a Dockerfile or
+  # dependency bump that no longer builds (python 3.14 vs Pillow 10.2.0) was
+  # auto-merged and broke every later release. Build it here too, unpushed,
+  # on the same arm64 runner the release uses.
+  backend-image:
+    name: docker build (backend)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          cache-from: type=gha,scope=ci-backend
+          cache-to: type=gha,mode=max,scope=ci-backend
+
   # ── Web UI ────────────────────────────────────────────────────────────────
   web-ui:
     name: next build

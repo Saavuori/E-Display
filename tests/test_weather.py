@@ -73,3 +73,37 @@ def test_every_symbol_has_a_draw_category():
         category = SYMBOL_CATEGORY.get(code)
         assert category is not None, f"symbol {code} has no category"
         assert category in _ICON_DRAWERS, f"category {category} has no drawer"
+
+
+def test_parse_response_all_past_picks_most_recent():
+    client = FMIWeatherClient(cache_minutes=30)
+    now = datetime.now(timezone.utc)
+    older = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent = (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    xml = _bswfs_xml([(older, "Temperature", "1.0"), (recent, "Temperature", "5.0")])
+    assert client._parse_response(xml, "Helsinki").temperature == 5.0
+
+
+def test_fetch_current_honours_per_call_cache_minutes(monkeypatch, tmp_path):
+    import time
+    from weather import WeatherData
+    client = FMIWeatherClient(cache_minutes=30)
+    client._cache_file = str(tmp_path / "cache.json")
+    client._cache = {"helsinki": WeatherData(1.0, "Clear", 1, "Helsinki", time.time() - 10 * 60)}
+    fresh = WeatherData(2.0, "Clear", 1, "Helsinki", time.time())
+    monkeypatch.setattr(client, "_fetch_from_fmi", lambda place: fresh)
+
+    assert client.fetch_current("Helsinki").temperature == 1.0      # 10 min < 30
+    assert client.fetch_current("Helsinki", cache_minutes=5) is fresh  # 10 min > 5
+
+
+def test_fetch_current_keeps_stale_value_when_parse_fails(monkeypatch, tmp_path):
+    import time
+    from weather import WeatherData
+    client = FMIWeatherClient(cache_minutes=30)
+    client._cache_file = str(tmp_path / "cache.json")
+    stale = WeatherData(1.0, "Clear", 1, "Helsinki", time.time() - 3600)
+    client._cache = {"helsinki": stale}
+    monkeypatch.setattr(client, "_fetch_from_fmi", lambda place: None)
+    assert client.fetch_current("Helsinki") is stale

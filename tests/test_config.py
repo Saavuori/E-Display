@@ -67,3 +67,19 @@ def test_weather_defaults():
     assert cfg.weather.enabled is True
     assert cfg.weather.location == "Helsinki"
     assert cfg.weather.cache_minutes == 30
+
+
+def test_partial_display_block_keeps_defaults():
+    """A hand-edited config.json with a partial `display` block used to raise
+    TypeError in DisplaySettings(**...)."""
+    cfg = Config.from_dict({"display": {"max_items": 7, "unknown_key": 1}})
+    assert cfg.display.max_items == 7
+    assert cfg.display.show_arrival_minutes_threshold == 10
+    assert cfg.display.hide_arrival_before_minutes == 10
+
+
+def test_missing_config_file_still_applies_env_key(monkeypatch, tmp_path):
+    import config
+    monkeypatch.setattr(config, "CONFIG_FILE", str(tmp_path / "config.json"))
+    monkeypatch.setenv("HSL_API_KEY", "from-env")
+    assert config.load_config().hsl_api_key == "from-env"
