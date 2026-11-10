@@ -75,5 +75,39 @@
         "enabled": true,
         "location": "Helsinki",
         "cache_minutes": 30
+    },
+    "screen": "transit",
+    "prices": {
+        "source_url": "https://fingrid.saavuori.live/api/prices",
+        "vat_percent": 25.5,
+        "cheap_threshold": 5.0,
+        "expensive_threshold": 20.0,
+        "cheapest_window_hours": 3,
+        "chart_hours": 36,
+        "cache_minutes": 15
+    },
+    "price_layout": {
+        "clock_x": 20,
+        "clock_y": 8,
+        "font_clock": 80,
+        "date_y": 94,
+        "price_x": 520,
+        "price_y": 10,
+        "font_price": 84,
+        "font_unit": 30,
+        "header_line_y": 128,
+        "stats_x": 20,
+        "stats_value_x": 150,
+        "stats_y": 138,
+        "stats_line_gap": 30,
+        "font_stats": 24,
+        "chart_x": 48,
+        "chart_y": 240,
+        "chart_width": 740,
+        "chart_height": 200,
+        "font_axis": 18,
+        "weather_x": 790,
+        "weather_y": 15,
+        "font_small": 22
     }
 }

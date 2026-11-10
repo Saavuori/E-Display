@@ -23,8 +23,23 @@ export interface WeatherSettings {
     cache_minutes: number;
 }
 
-// The layout is edited and saved separately through /api/layout, so the
-// settings form neither needs nor sends it.
+// Which screen the panel shows (Config.screen in config.py).
+export type Screen = "transit" | "prices";
+
+// Spot-price screen settings (PricesConfig in config.py). Thresholds are in
+// c/kWh including VAT.
+export interface PricesSettings {
+    source_url: string;
+    vat_percent: number;
+    cheap_threshold: number;
+    expensive_threshold: number;
+    cheapest_window_hours: number;
+    chart_hours: number;
+    cache_minutes: number;
+}
+
+// Layouts are edited and saved separately through /api/layout and
+// /api/layout/prices, so the settings form neither needs nor sends them.
 export interface Config {
     hsl_api_url: string;
     hsl_api_key: string;
@@ -33,6 +48,8 @@ export interface Config {
     epd_driver?: string;
     display: DisplaySettings;
     weather?: WeatherSettings;
+    screen: Screen;
+    prices: PricesSettings;
 }
 
 export interface LayoutConfig {
@@ -71,4 +88,52 @@ export interface Alert {
 export interface ArrivalsData {
     arrivals: Arrival[];
     alerts: Alert[];
+}
+
+// Spot-price screen layout (PriceLayoutConfig in config.py), pixel values.
+export interface PriceLayoutConfig {
+    clock_x: number;
+    clock_y: number;
+    font_clock: number;
+    date_y: number;
+    price_x: number;
+    price_y: number;
+    font_price: number;
+    font_unit: number;
+    header_line_y: number;
+    stats_x: number;
+    stats_value_x: number;
+    stats_y: number;
+    stats_line_gap: number;
+    font_stats: number;
+    chart_x: number;
+    chart_y: number;
+    chart_width: number;
+    chart_height: number;
+    font_axis: number;
+    weather_x: number;
+    weather_y: number;
+    font_small: number;
+}
+
+// GET /api/prices. Prices are c/kWh including VAT; times are ISO 8601 in
+// Finnish time.
+export interface PriceStats {
+    min: number;
+    min_at: string;
+    avg: number;
+    max: number;
+    max_at: string;
+}
+
+export interface PricesData {
+    current: { start: string; end: string; price: number } | null;
+    today: PriceStats | null;
+    tomorrow: PriceStats | null;
+    cheapest: { hours: number; start: string; end: string; avg: number } | null;
+    points: { start: string; price: number }[];
+    cheap_threshold: number;
+    expensive_threshold: number;
+    fetched_at: string;
+    stale: boolean;
 }

@@ -65,6 +65,77 @@ class WeatherConfig:
     cache_minutes: int = 30
 
 
+#: Screens the panel can show; `Config.screen` picks one.
+SCREEN_TRANSIT = "transit"
+SCREEN_PRICES = "prices"
+SCREENS = (SCREEN_TRANSIT, SCREEN_PRICES)
+
+
+@dataclass
+class PricesConfig:
+    """Configuration for the electricity spot-price screen.
+
+    Prices come from the fingrid-viewer's public `/api/prices` endpoint, which
+    holds the ENTSO-E token server-side, so nothing secret is needed here.
+    Thresholds are in c/kWh including VAT, the unit the screen shows.
+    """
+    source_url: str = "https://fingrid.saavuori.live/api/prices"
+    vat_percent: float = 25.5
+    cheap_threshold: float = 5.0
+    expensive_threshold: float = 20.0
+    cheapest_window_hours: int = 3
+    chart_hours: int = 36
+    cache_minutes: int = 15
+
+
+@dataclass
+class PriceLayoutConfig:
+    """Pixel positions and font sizes for the spot-price screen."""
+
+    # Clock and date, top left
+    clock_x: int = 20
+    clock_y: int = 8
+    font_clock: int = 80
+    date_y: int = 94
+
+    # Current price: the number's right edge sits at price_x
+    price_x: int = 520
+    price_y: int = 10
+    font_price: int = 84
+    font_unit: int = 30
+
+    # Red separator under the header
+    header_line_y: int = 128
+
+    # Stats lines (today, tomorrow, cheapest window)
+    stats_x: int = 20
+    stats_value_x: int = 150
+    stats_y: int = 138
+    stats_line_gap: int = 30
+    font_stats: int = 24
+
+    # Bar chart; y-axis labels sit left of chart_x, hour labels below it
+    chart_x: int = 48
+    chart_y: int = 240
+    chart_width: int = 740
+    chart_height: int = 200
+    font_axis: int = 18
+
+    # Weather overlay (top right) and small text such as the date
+    weather_x: int = 790
+    weather_y: int = 15
+    font_small: int = 22
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for saving."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'PriceLayoutConfig':
+        """Create PriceLayoutConfig from dictionary; missing keys keep their defaults."""
+        return _from_partial_dict(cls, data)
+
+
 @dataclass
 class LayoutConfig:
     """Configurable layout parameters for the e-paper display."""
@@ -122,6 +193,9 @@ class Config:
     layout: LayoutConfig
     epd_driver: str = "epd7in5b_V2"  # Waveshare driver module name in lib/waveshare_epd
     weather: WeatherConfig = field(default_factory=WeatherConfig)
+    screen: str = SCREEN_TRANSIT  # which screen the panel shows, one of SCREENS
+    prices: PricesConfig = field(default_factory=PricesConfig)
+    price_layout: PriceLayoutConfig = field(default_factory=PriceLayoutConfig)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'Config':
@@ -134,6 +208,7 @@ class Config:
         display = DisplaySettings.from_dict(data.get('display', {}))
         layout = LayoutConfig.from_dict(data.get('layout', {}))
         weather = _from_partial_dict(WeatherConfig, data.get('weather', {}))
+        screen = data.get('screen', SCREEN_TRANSIT)
         return cls(
             hsl_api_url=data.get('hsl_api_url', 'https://api.digitransit.fi/routing/v2/hsl/gtfs/v1'),
             hsl_api_key=os.environ.get('HSL_API_KEY') or data.get('hsl_api_key', ''),
@@ -143,8 +218,12 @@ class Config:
             layout=layout,
             epd_driver=data.get('epd_driver', 'epd7in5b_V2'),
             weather=weather,
+            # An unknown screen name falls back to the tram screen.
+            screen=screen if screen in SCREENS else SCREEN_TRANSIT,
+            prices=_from_partial_dict(PricesConfig, data.get('prices', {})),
+            price_layout=PriceLayoutConfig.from_dict(data.get('price_layout', {})),
         )
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary for saving."""
         return {
@@ -156,6 +235,9 @@ class Config:
             'display': asdict(self.display),
             'layout': self.layout.to_dict(),
             'weather': asdict(self.weather),
+            'screen': self.screen,
+            'prices': asdict(self.prices),
+            'price_layout': self.price_layout.to_dict(),
         }
 
 

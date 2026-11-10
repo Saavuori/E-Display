@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import StopSearch from "./StopSearch";
 import { getModeColor, getModeIcon } from "@/lib/transitModes";
-import type { Config, DisplaySettings, Route, WeatherSettings } from "@/lib/types";
+import type { Config, DisplaySettings, PricesSettings, Route, Screen, WeatherSettings } from "@/lib/types";
 
 interface ConfigFormProps {
     config: Config;
@@ -63,12 +63,150 @@ export default function ConfigForm({ config, onSave, saving, apiBase }: ConfigFo
         });
     };
 
+    const updatePrices = <K extends keyof PricesSettings>(field: K, value: PricesSettings[K]) => {
+        setFormData({
+            ...formData,
+            prices: { ...formData.prices, [field]: value },
+        });
+    };
+
+    const screens: { id: Screen; label: string; hint: string }[] = [
+        { id: "transit", label: "🚋 Departures", hint: "HSL stops and routes" },
+        { id: "prices", label: "⚡ Spot prices", hint: "Electricity price today and tomorrow" },
+    ];
+    const isTransit = formData.screen !== "prices";
+
     const inputClass =
         "w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all";
     const labelClass = "block text-sm font-medium text-zinc-300 mb-2";
 
     return (
         <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Which screen the panel shows */}
+            <section>
+                <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
+                    Screen
+                </h3>
+                <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Screen">
+                    {screens.map((option) => {
+                        const active = (formData.screen ?? "transit") === option.id;
+                        return (
+                            <button
+                                key={option.id}
+                                type="button"
+                                role="radio"
+                                aria-checked={active}
+                                onClick={() => setFormData({ ...formData, screen: option.id })}
+                                className={`p-3 text-left rounded-lg border transition-colors ${
+                                    active
+                                        ? "bg-blue-500/15 border-blue-500 text-white"
+                                        : "bg-zinc-800/50 border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                                }`}
+                            >
+                                <div className="font-medium">{option.label}</div>
+                                <div className="text-xs text-zinc-500 mt-0.5">{option.hint}</div>
+                            </button>
+                        );
+                    })}
+                </div>
+                <p className="text-xs text-zinc-500 mt-2">The panel switches as soon as you save.</p>
+            </section>
+
+            {!isTransit && formData.prices && (
+                <section>
+                    <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
+                        ⚡ Spot Prices
+                    </h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className={labelClass}>Price Source URL</label>
+                            <input
+                                type="url"
+                                value={formData.prices.source_url}
+                                onChange={(e) => updatePrices("source_url", e.target.value)}
+                                className={inputClass}
+                            />
+                            <p className="text-xs text-zinc-500 mt-1">
+                                fingrid-viewer&apos;s /api/prices. It holds the ENTSO-E token, so none is needed here.
+                            </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className={labelClass}>VAT (%)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="50"
+                                    step="0.1"
+                                    value={formData.prices.vat_percent}
+                                    onChange={(e) => updatePrices("vat_percent", parseFloat(e.target.value) || 0)}
+                                    className={inputClass}
+                                />
+                            </div>
+                            <div>
+                                <label className={labelClass}>Cheapest Window (hours)</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="12"
+                                    value={formData.prices.cheapest_window_hours}
+                                    onChange={(e) => updatePrices("cheapest_window_hours", parseInt(e.target.value) || 1)}
+                                    className={inputClass}
+                                />
+                            </div>
+                            <div>
+                                <label className={labelClass}>Cheap At Or Below (c/kWh)</label>
+                                <input
+                                    type="number"
+                                    step="0.5"
+                                    value={formData.prices.cheap_threshold}
+                                    onChange={(e) => updatePrices("cheap_threshold", parseFloat(e.target.value) || 0)}
+                                    className={inputClass}
+                                />
+                            </div>
+                            <div>
+                                <label className={labelClass}>Expensive From (c/kWh)</label>
+                                <input
+                                    type="number"
+                                    step="0.5"
+                                    value={formData.prices.expensive_threshold}
+                                    onChange={(e) => updatePrices("expensive_threshold", parseFloat(e.target.value) || 0)}
+                                    className={inputClass}
+                                />
+                            </div>
+                            <div>
+                                <label className={labelClass}>Chart Span (hours)</label>
+                                <input
+                                    type="number"
+                                    min="6"
+                                    max="48"
+                                    value={formData.prices.chart_hours}
+                                    onChange={(e) => updatePrices("chart_hours", parseInt(e.target.value) || 6)}
+                                    className={inputClass}
+                                />
+                            </div>
+                            <div>
+                                <label className={labelClass}>Cache (minutes)</label>
+                                <input
+                                    type="number"
+                                    min="5"
+                                    max="120"
+                                    value={formData.prices.cache_minutes}
+                                    onChange={(e) => updatePrices("cache_minutes", parseInt(e.target.value) || 5)}
+                                    className={inputClass}
+                                />
+                            </div>
+                        </div>
+                        <p className="text-xs text-zinc-500">
+                            VAT is added to positive prices only. On the panel, expensive bars are red and cheap ones are outlined.
+                            The panel redraws every quarter-hour.
+                        </p>
+                    </div>
+                </section>
+            )}
+
+            {/* HSL settings only matter on the departures screen */}
+            {isTransit && (<>
             {/* API Configuration */}
             <section>
                 <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide mb-4">
@@ -200,6 +338,8 @@ export default function ConfigForm({ config, onSave, saving, apiBase }: ConfigFo
                     </div>
                 </div>
             </section>
+
+            </>)}
 
             {/* Weather Settings */}
             <section>
