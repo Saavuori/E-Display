@@ -5,6 +5,8 @@ import ConfigForm from "@/components/ConfigForm";
 import DisplayPreview from "@/components/DisplayPreview";
 import CollapsibleSection from "@/components/CollapsibleSection";
 import LayoutEditor from "@/components/LayoutEditor";
+import PriceLayoutEditor from "@/components/PriceLayoutEditor";
+import PricesCard from "@/components/PricesCard";
 import type { Config } from "@/lib/types";
 
 interface WeatherStatus {
@@ -82,11 +84,12 @@ export default function Dashboard({ apiBase }: DashboardProps) {
     const handleSave = async (newConfig: Config) => {
         setSaving(true);
         try {
-            // GET /api/config also returns the layout. Leave it out of the save:
-            // the copy loaded with the page would overwrite anything saved in
-            // the layout editor since, and the backend keeps the stored one.
+            // GET /api/config also returns both layouts. Leave them out of the
+            // save: the copies loaded with the page would overwrite anything
+            // saved in a layout editor since, and the backend keeps the stored ones.
             const settings: Record<string, unknown> = { ...newConfig };
             delete settings.layout;
+            delete settings.price_layout;
             const res = await fetch(`${apiBase}/api/config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -112,6 +115,8 @@ export default function Dashboard({ apiBase }: DashboardProps) {
         setPreviewKey((k) => k + 1);
     };
 
+    const isPrices = config?.screen === "prices";
+
     if (loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
@@ -130,7 +135,7 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                             E-Display Control Panel
                         </h1>
                         <p className="text-zinc-400 mt-2">
-                            Configure and preview your e-paper bus schedule display
+                            Configure and preview your e-paper display
                         </p>
                     </div>
                     {/* Weather Status Card */}
@@ -224,9 +229,27 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                 </CollapsibleSection>
             </div>
 
-            {/* Bottom Row: Layout Editor - Full Width */}
+            {/* Spot prices, when the panel shows them */}
+            {isPrices && (
+                <div className="mb-8">
+                    <CollapsibleSection
+                        title="Spot Prices"
+                        defaultOpen={true}
+                        headerColor="text-amber-400"
+                        icon={
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                        }
+                    >
+                        <PricesCard apiBase={apiBase} refreshKey={previewKey} />
+                    </CollapsibleSection>
+                </div>
+            )}
+
+            {/* Bottom Row: Layout Editor for the active screen - Full Width */}
             <CollapsibleSection
-                title="Layout Editor"
+                title={isPrices ? "Layout Editor · Spot Prices" : "Layout Editor"}
                 defaultOpen={true}
                 headerColor="text-purple-400"
                 icon={
@@ -235,11 +258,15 @@ export default function Dashboard({ apiBase }: DashboardProps) {
                     </svg>
                 }
             >
-                <LayoutEditor
-                    apiBase={apiBase}
-                    maxItems={config?.display.max_items ?? 5}
-                    onLayoutSaved={handleLayoutSaved}
-                />
+                {isPrices ? (
+                    <PriceLayoutEditor apiBase={apiBase} onLayoutSaved={handleLayoutSaved} />
+                ) : (
+                    <LayoutEditor
+                        apiBase={apiBase}
+                        maxItems={config?.display.max_items ?? 5}
+                        onLayoutSaved={handleLayoutSaved}
+                    />
+                )}
             </CollapsibleSection>
 
             {/* Version Badge Footer */}

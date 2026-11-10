@@ -1,7 +1,8 @@
 """
-E-Paper Display for HSL Bus Schedule
+E-Paper Display for HSL Bus Schedule and electricity spot prices
 
-Displays real-time bus arrival information on a Waveshare 7.5" e-paper display.
+Displays real-time bus arrival information, or Finnish day-ahead electricity
+prices, on a Waveshare 7.5" e-paper display. `config.screen` picks which.
 """
 
 import os
@@ -10,7 +11,7 @@ import time
 import textwrap
 import importlib
 import traceback
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,11 +24,13 @@ from config import (
     DISPLAY_WIDTH, DISPLAY_HEIGHT,
     COLOR_BLACK,
     ERROR_RETRY_SECONDS, SCREEN_CLEAR_HOUR,
-    REFRESH_TRIGGER_FILE,
-    Fonts, load_config, Config, LayoutConfig
+    REFRESH_TRIGGER_FILE, SCREEN_PRICES,
+    Fonts, load_config, Config, LayoutConfig, PriceLayoutConfig, PricesConfig
 )
 
 from weather import WeatherData, current_weather, draw_weather_icon
+from prices import PriceView, build_view, current_prices, seconds_until_next_slot
+from price_screen import PriceFonts, draw_price_screen
 
 # Add lib folder for display driver modules. Anchored to this file rather than
 # the working directory, so running display.py from another directory still
@@ -254,6 +257,9 @@ class DisplayRenderer:
         """Pick up layout and display settings from a (re)loaded config."""
         self.fonts = Fonts(FONT_DIR, layout=config.layout)
         self.layout = config.layout
+        self.price_layout: PriceLayoutConfig = config.price_layout
+        self.price_fonts = PriceFonts(config.price_layout)
+        self.price_settings: PricesConfig = config.prices
         self.max_items = config.display.max_items
         self.show_minutes_threshold = config.display.show_arrival_minutes_threshold
 
@@ -280,11 +286,30 @@ class DisplayRenderer:
 
         self._draw_grid_lines(draw_red)
         self._draw_clock(draw_bw)
-        self._draw_temperature(draw_bw, weather)
-        self._draw_weather_icon(draw_bw, weather)
+        self._draw_weather(draw_bw, weather, self.layout.weather_x, self.layout.weather_y, self.fonts.header)
         self._draw_headers(draw_bw)
         self._draw_arrivals(draw_bw, draw_red, arrivals)
         self._draw_alerts(draw_bw, alerts)
+
+        template_bw.save(os.path.join(self.pic_dir, 'screen_output_bw.png'))
+        template_red.save(os.path.join(self.pic_dir, 'screen_output_red.png'))
+
+        return template_bw, template_red
+
+    def render_prices(self, view: PriceView,
+                      weather: Optional[WeatherData] = None) -> tuple[Image.Image, Image.Image]:
+        """Render the spot-price screen into black and red layers.
+
+        Saved to pic/ like render_schedule, and returned for the same reason.
+        """
+        template_bw = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
+        template_red = Image.new('1', (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
+        draw_bw = ImageDraw.Draw(template_bw)
+        draw_red = ImageDraw.Draw(template_red)
+
+        draw_price_screen(draw_bw, draw_red, view, self.price_settings, self.price_layout, self.price_fonts)
+        self._draw_weather(draw_bw, weather, self.price_layout.weather_x, self.price_layout.weather_y,
+                           self.price_fonts.unit)
 
         template_bw.save(os.path.join(self.pic_dir, 'screen_output_bw.png'))
         template_red.save(os.path.join(self.pic_dir, 'screen_output_red.png'))
@@ -333,29 +358,17 @@ class DisplayRenderer:
     def _temperature_text(weather: WeatherData) -> str:
         return f"{weather.temperature:+.1f}°C"
 
-    def _draw_temperature(self, draw: ImageDraw, weather: Optional[WeatherData]):
-        """Draw current temperature right-aligned in the top-right area beside the clock."""
+    def _draw_weather(self, draw: ImageDraw, weather: Optional[WeatherData], x: int, y: int, font):
+        """Draw the temperature right-aligned at (x, y), with the condition icon to its left."""
         if weather is None:
             return
-        draw.text(
-            (self.layout.weather_x, self.layout.weather_y),
-            self._temperature_text(weather),
-            font=self.fonts.header,
-            fill=COLOR_BLACK,
-            anchor="ra",  # right edge, top of ascender
-        )
+        text = self._temperature_text(weather)
+        draw.text((x, y), text, font=font, fill=COLOR_BLACK, anchor="ra")  # right edge, top of ascender
 
-    def _draw_weather_icon(self, draw: ImageDraw, weather: Optional[WeatherData]):
-        """Draw weather condition icon to the left of the temperature text."""
-        if weather is None:
-            return
         icon_size = 46  # pixels — fits inside the 90px top zone
-        # Measure temperature text width for precise icon placement
-        bbox = draw.textbbox((0, 0), self._temperature_text(weather), font=self.fonts.header, anchor="la")
+        bbox = draw.textbbox((0, 0), text, font=font, anchor="la")
         text_width = bbox[2] - bbox[0]
-        icon_x = self.layout.weather_x - text_width - 10 - icon_size
-        icon_y = self.layout.weather_y
-        draw_weather_icon(draw, icon_x, icon_y, icon_size, weather.symbol_code)
+        draw_weather_icon(draw, x - text_width - 10 - icon_size, y, icon_size, weather.symbol_code)
 
     def _draw_grid_lines(self, draw: ImageDraw):
         """Draw the grid lines for the schedule."""
@@ -426,6 +439,21 @@ class DisplayRenderer:
 # MAIN APPLICATION
 # =============================================================================
 
+#: The price screen redraws when each quarter-hour price period starts.
+PRICE_REFRESH_MINUTES = 15
+
+
+def sleep_seconds(config: Config, now: datetime) -> int:
+    """How long the loop waits before the next redraw.
+
+    The tram screen uses refresh_interval_seconds; the price screen wakes just
+    after the next quarter-hour, so its "now" price is never out of date.
+    """
+    if config.screen == SCREEN_PRICES:
+        return seconds_until_next_slot(now, PRICE_REFRESH_MINUTES)
+    return config.refresh_interval_seconds
+
+
 class BusScheduleDisplay:
     """Main application class for the bus schedule display."""
 
@@ -482,7 +510,7 @@ class BusScheduleDisplay:
                 break
 
             # Wait for next refresh, but check for manual trigger every second
-            refresh_interval = self.config.refresh_interval_seconds
+            refresh_interval = sleep_seconds(self.config, datetime.now(timezone.utc))
             print(f"Sleeping for {refresh_interval} seconds...", flush=True)
 
             for i in range(refresh_interval):
@@ -507,6 +535,10 @@ class BusScheduleDisplay:
         # Weather is cached, so this won't call FMI on every cycle
         weather = current_weather(self.config.weather)
 
+        if self.config.screen == SCREEN_PRICES:
+            self._update_prices(weather)
+            return
+
         try:
             print('Attempting to connect to HSL API.', flush=True)
             stop_ids = [s.id for s in self.config.stops]
@@ -519,6 +551,15 @@ class BusScheduleDisplay:
             return
 
         image_bw, image_red = self.renderer.render_schedule(arrivals, alerts, weather=weather)
+        self.renderer.write_to_screen(image_bw, image_red)
+
+    def _update_prices(self, weather: Optional[WeatherData]):
+        """Fetch spot prices (cached) and draw the price screen."""
+        view = build_view(current_prices(self.config.prices), self.config.prices, datetime.now(timezone.utc))
+        if not view.has_data:
+            self._handle_error("PRICE")
+            return
+        image_bw, image_red = self.renderer.render_prices(view, weather=weather)
         self.renderer.write_to_screen(image_bw, image_red)
 
     def _handle_error(self, error_type: str):

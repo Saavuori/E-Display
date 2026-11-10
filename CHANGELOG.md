@@ -14,6 +14,20 @@ conventional-commit prefixes in the pushed commits. See
 
 ### Added
 
+- A second screen: Finnish electricity spot prices. Choose it in the web UI's
+  settings and the panel switches right away. It shows the current
+  quarter-hour price in c/kWh including VAT (red when expensive), today's and
+  tomorrow's min/average/max, the cheapest stretch of hours ahead (3 h by
+  default), and a chart of the coming day and a half. The chart marks the
+  current quarter-hour, draws expensive prices in red and cheap ones as
+  outlines, and brackets the cheapest window.
+- The price screen redraws at every quarter-hour, when a new price starts.
+  Prices come from the fingrid-viewer's public endpoint, so no ENTSO-E token
+  is needed on the Pi. If that endpoint is down, the last fetched prices keep
+  the screen correct for as long as they cover the present, and a
+  "päivitetty hh:mm" note shows when they are more than an hour old.
+- A spot-price panel on the dashboard, and a layout editor for the price
+  screen that shows the real rendered frame.
 - `CHANGELOG.md` — this file.
 - `CLAUDE.md` — project instructions for Claude Code.
 - CI builds the backend Docker image on every pull request, so a base-image or

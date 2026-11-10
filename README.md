@@ -2,7 +2,7 @@
 
 **[📖 Project site — saavuori.github.io/E-Display](https://saavuori.github.io/E-Display/)**
 
-**E-Display** is a smart, e-ink public transport display for Helsinki Regional Transport (HSL) data. It is designed to run on a Raspberry Pi connected to a Waveshare 7.5" E-Ink display (Black/White/Red).
+**E-Display** is a smart, e-ink public transport display for Helsinki Regional Transport (HSL) data that can also show Finnish electricity spot prices. It is designed to run on a Raspberry Pi connected to a Waveshare 7.5" E-Ink display (Black/White/Red).
 
 The project consists of two main components:
 1.  **Backend**: A Python application that fetches data from the HSL API, renders the schedule, and updates the e-ink display. It also provides a REST API for configuration.
@@ -11,6 +11,7 @@ The project consists of two main components:
 ## Features
 
 -   **Real-time Departures**: Shows upcoming bus/tram/train departures for configured stops.
+-   **Spot Prices**: A second screen with the current Finnish electricity price (c/kWh incl. VAT), today's and tomorrow's min/avg/max, the cheapest hours ahead and a 36-hour chart. Switch between the two screens in the web UI.
 -   **E-Ink Support**: Optimized for Waveshare 7.5" E-Ink displays (supports 3-color rendering).
 -   **Web Configuration**: Easy-to-use web interface to search for stops and manage settings.
 -   **Live Preview**: visual editor to adjust the layout and see how it will look on the actual screen.
@@ -155,6 +156,37 @@ Configuration is stored in `config.json` in the root directory. You can edit thi
     }
 }
 ```
+
+### Spot-price screen
+
+Set `"screen": "prices"` (or pick **Spot prices** in the web UI) to show
+electricity prices instead of departures. The panel then redraws at every
+quarter-hour, when a new price period starts.
+
+```json
+{
+    "screen": "prices",
+    "prices": {
+        "source_url": "https://fingrid.saavuori.live/api/prices",
+        "vat_percent": 25.5,
+        "cheap_threshold": 5.0,
+        "expensive_threshold": 20.0,
+        "cheapest_window_hours": 3,
+        "chart_hours": 36,
+        "cache_minutes": 15
+    }
+}
+```
+
+Prices are the day-ahead prices for Finland from the
+[ENTSO-E Transparency Platform](https://transparency.entsoe.eu), read through
+the public `/api/prices` endpoint of
+[fingrid-data-collector](https://github.com/Saavuori/fingrid-data-collector)'s
+viewer. The viewer holds the ENTSO-E token, so the Pi needs none. Thresholds
+are in c/kWh including VAT. VAT is added to positive prices only. Tomorrow's
+prices appear after they are published, around 14:00 Finnish time. The price
+screen's positions and font sizes live in `price_layout` and are edited in the
+web UI.
 
 ## License
 

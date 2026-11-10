@@ -2,7 +2,7 @@
 
 import json
 
-from config import Config, LayoutConfig, WeatherConfig
+from config import Config, LayoutConfig, PriceLayoutConfig, PricesConfig, WeatherConfig
 
 
 def _sample_config() -> Config:
@@ -83,3 +83,30 @@ def test_missing_config_file_still_applies_env_key(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CONFIG_FILE", str(tmp_path / "config.json"))
     monkeypatch.setenv("HSL_API_KEY", "from-env")
     assert config.load_config().hsl_api_key == "from-env"
+
+
+def test_screen_and_prices_round_trip():
+    cfg = Config.from_dict({
+        "screen": "prices",
+        "prices": {"vat_percent": 10.0, "chart_hours": 24},
+        "price_layout": {"chart_y": 250},
+    })
+    restored = Config.from_dict(json.loads(json.dumps(cfg.to_dict())))
+
+    assert restored.screen == "prices"
+    assert restored.prices.vat_percent == 10.0
+    assert restored.prices.chart_hours == 24
+    assert restored.prices.expensive_threshold == PricesConfig().expensive_threshold
+    assert restored.price_layout.chart_y == 250
+    assert restored.price_layout.chart_x == PriceLayoutConfig().chart_x
+
+
+def test_old_config_defaults_to_transit_screen():
+    cfg = Config.from_dict({"hsl_api_key": "k"})
+    assert cfg.screen == "transit"
+    assert cfg.prices == PricesConfig()
+    assert cfg.price_layout == PriceLayoutConfig()
+
+
+def test_unknown_screen_falls_back_to_transit():
+    assert Config.from_dict({"screen": "stocks"}).screen == "transit"

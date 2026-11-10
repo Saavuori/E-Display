@@ -12,6 +12,7 @@ dependencies = [
     "pydantic==2.14.3",
     "python-multipart==0.0.33",
     "numpy>=1.24.0",
+    "tzdata==2026.6",
 ]
 
 [project.optional-dependencies]

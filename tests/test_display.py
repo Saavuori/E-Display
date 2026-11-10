@@ -1,9 +1,12 @@
 """Tests for the display data models and HSL parsing (no hardware / network)."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from display import BusArrival, BusScheduleDisplay, HSLClient, load_epd_driver
+from config import Config, SCREEN_PRICES
+from display import BusArrival, BusScheduleDisplay, DisplayRenderer, HSLClient, load_epd_driver, sleep_seconds
+from prices import HELSINKI, build_view, parse_viewer_response
+from waveshare_epd import epd_mock
 
 
 def test_bus_arrival_is_late():
@@ -135,3 +138,43 @@ def test_screen_clear_runs_once_per_day():
     assert app._clear_due(datetime(2026, 1, 15, 3, 5)) is False
     assert app._clear_due(datetime(2026, 1, 16, 3, 0)) is True
     assert app._clear_due(datetime(2026, 1, 16, 4, 0)) is False
+
+
+def test_sleep_follows_screen():
+    now = datetime(2026, 11, 10, 12, 14, 0, tzinfo=timezone.utc)
+    transit = Config.from_dict({"refresh_interval_seconds": 120})
+    assert sleep_seconds(transit, now) == 120
+
+    prices = Config.from_dict({"screen": SCREEN_PRICES, "refresh_interval_seconds": 120})
+    assert sleep_seconds(prices, now) == 65  # just past 12:15
+
+
+def _price_body(start: datetime, values: list[float]) -> dict:
+    ms = int(start.timestamp() * 1000)
+    return {"resolutionMinutes": 15, "points": [[ms + i * 900_000, v] for i, v in enumerate(values)]}
+
+
+def test_render_prices_draws_both_layers(tmp_path):
+    """A smoke test over awkward data: negative prices, a price above the
+    threshold, and a DST day with no tomorrow published yet."""
+    cfg = Config.from_dict({"screen": SCREEN_PRICES})
+    now = datetime(2026, 10, 25, 9, 7, tzinfo=HELSINKI)
+    day_start = datetime(2026, 10, 25, tzinfo=HELSINKI).astimezone(timezone.utc)
+    values = [(-20.0 if i % 7 == 0 else 50.0 + i) for i in range(100)] + [400.0]
+    data = parse_viewer_response(_price_body(day_start, values), fetched_at=time.time() - 7200)
+    view = build_view(data, cfg.prices, now)
+    assert view.stale
+
+    renderer = DisplayRenderer.from_config(epd_mock.EPD(), cfg, pic_dir=str(tmp_path))
+    bw, red = renderer.render_prices(view)
+
+    assert bw.size == red.size == (800, 480)
+    assert bw.getextrema() == (0, 255) and red.getextrema() == (0, 255)  # both layers drawn on
+    assert (tmp_path / "screen_output_bw.png").exists()
+
+
+def test_render_prices_without_data(tmp_path):
+    cfg = Config.from_dict({"screen": SCREEN_PRICES})
+    view = build_view(None, cfg.prices, datetime.now(timezone.utc))
+    bw, red = DisplayRenderer.from_config(epd_mock.EPD(), cfg, pic_dir=str(tmp_path)).render_prices(view)
+    assert bw.getextrema() == (0, 255)

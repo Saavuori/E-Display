@@ -5,8 +5,10 @@ Guidance for Claude Code when working in this repository.
 ## What this project is
 
 E-Display drives a Waveshare 7.5" three-colour (black/white/red) e-paper display
-on a Raspberry Pi, showing live HSL (Helsinki Regional Transport) departures plus
-an FMI weather overlay. It ships as three containers built from two images.
+on a Raspberry Pi. It shows one of two screens, picked by `config.screen`: live
+HSL (Helsinki Regional Transport) departures, or Finnish electricity spot
+prices. Both have an FMI weather overlay. It ships as three containers built
+from two images.
 
 | Component | Entry point | Image | Port |
 | --- | --- | --- | --- |
@@ -49,6 +51,20 @@ restarts containers labelled `com.centurylinklabs.watchtower.scope=e-display`.
 - **The web UI never talks to the backend by IP.** `next.config.ts` rewrites
   `/api/:path*` to `http://backend:8000`. Do not reintroduce a
   `NEXT_PUBLIC_API_URL` hardcoded host.
+- **Two screens, one loop.** `config.screen` is `"transit"` or `"prices"`.
+  `BusScheduleDisplay._update_display()` and `api.generate_preview()` dispatch
+  on it. The transit screen sleeps `refresh_interval_seconds`; the price screen
+  wakes just after each quarter-hour (`display.sleep_seconds`). A settings save
+  that changes `screen` touches the refresh trigger so the panel switches at
+  once. Each screen has its own layout slice and writer: `layout` uses
+  `PUT /api/layout`, and `price_layout` uses `PUT /api/layout/prices`.
+- **Spot prices come from fingrid-viewer, not ENTSO-E directly.**
+  `prices.py` reads `https://fingrid.saavuori.live/api/prices`
+  (Saavuori/fingrid-data-collector), which holds the ENTSO-E token
+  server-side, so the Pi needs no secret. `prices.py` is pure apart from
+  `PriceClient`. Price maths uses `Europe/Helsinki` via `zoneinfo` (the
+  `tzdata` package makes it work off-Linux), and drawing lives in
+  `price_screen.py`.
 - **`lib/waveshare_epd/` is vendored Waveshare code.** Treat it as third-party;
   don't refactor or reformat it.
 
@@ -93,9 +109,10 @@ npm run lint
 ## Testing
 
 `tests/` holds the whole suite: `test_config.py` (config round-trip and
-defaults), `test_display.py` (HSL response parsing, arrival formatting),
-`test_weather.py` (FMI response parsing and caching), `test_api.py` (API
-handlers called directly). Everything is offline — HTTP calls are
+defaults), `test_display.py` (HSL response parsing, arrival formatting, price
+screen rendering), `test_prices.py` (spot-price parsing, stats, cheapest
+window, chart geometry, caching), `test_weather.py` (FMI response parsing and
+caching), `test_api.py` (API handlers called directly). Everything is offline — HTTP calls are
 stubbed and the e-ink driver mocks itself out.
 
 New backend logic should come with a test here. If the logic is only reachable

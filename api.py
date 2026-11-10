@@ -2,7 +2,7 @@
 FastAPI backend for E-Display configuration and preview.
 
 Endpoints are plain `def`, not `async def`: they make blocking HTTP calls
-(HSL, FMI, geocoding) and render with PIL, so FastAPI runs them in its
+(HSL, FMI, geocoding, spot prices) and render with PIL, so FastAPI runs them in its
 threadpool instead of stalling the event loop for every other request.
 """
 
@@ -10,7 +10,9 @@ import os
 import time
 import base64
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
@@ -20,15 +22,17 @@ from pydantic import BaseModel
 
 # Import from config module
 from config import (
-    REFRESH_TRIGGER_FILE, TRIGGER_DIR,
+    REFRESH_TRIGGER_FILE, TRIGGER_DIR, SCREEN_PRICES,
     load_config, save_config, Config as ConfigData,
-    StopConfig, DisplaySettings, LayoutConfig, WeatherConfig
+    StopConfig, DisplaySettings, LayoutConfig, WeatherConfig,
+    PricesConfig, PriceLayoutConfig
 )
 
 # Import display engine components (importing display also puts lib/ on sys.path)
 from display import HSLClient, DisplayRenderer
 from waveshare_epd import epd_mock
 from weather import current_weather, weather_client
+from prices import HELSINKI, build_view, current_prices
 
 app = FastAPI(title="E-Display API", version=os.environ.get("APP_VERSION", "dev"))
 
@@ -98,6 +102,40 @@ class WeatherModel(BaseModel):
     location: str = "Helsinki"
     cache_minutes: int = 30
 
+class PricesModel(BaseModel):
+    source_url: str = PricesConfig.source_url
+    vat_percent: float = PricesConfig.vat_percent
+    cheap_threshold: float = PricesConfig.cheap_threshold
+    expensive_threshold: float = PricesConfig.expensive_threshold
+    cheapest_window_hours: int = PricesConfig.cheapest_window_hours
+    chart_hours: int = PricesConfig.chart_hours
+    cache_minutes: int = PricesConfig.cache_minutes
+
+class PriceLayoutModel(BaseModel):
+    """Price screen layout; defaults come from the dataclass, the only source of them."""
+    clock_x: int = PriceLayoutConfig.clock_x
+    clock_y: int = PriceLayoutConfig.clock_y
+    font_clock: int = PriceLayoutConfig.font_clock
+    date_y: int = PriceLayoutConfig.date_y
+    price_x: int = PriceLayoutConfig.price_x
+    price_y: int = PriceLayoutConfig.price_y
+    font_price: int = PriceLayoutConfig.font_price
+    font_unit: int = PriceLayoutConfig.font_unit
+    header_line_y: int = PriceLayoutConfig.header_line_y
+    stats_x: int = PriceLayoutConfig.stats_x
+    stats_value_x: int = PriceLayoutConfig.stats_value_x
+    stats_y: int = PriceLayoutConfig.stats_y
+    stats_line_gap: int = PriceLayoutConfig.stats_line_gap
+    font_stats: int = PriceLayoutConfig.font_stats
+    chart_x: int = PriceLayoutConfig.chart_x
+    chart_y: int = PriceLayoutConfig.chart_y
+    chart_width: int = PriceLayoutConfig.chart_width
+    chart_height: int = PriceLayoutConfig.chart_height
+    font_axis: int = PriceLayoutConfig.font_axis
+    weather_x: int = PriceLayoutConfig.weather_x
+    weather_y: int = PriceLayoutConfig.weather_y
+    font_small: int = PriceLayoutConfig.font_small
+
 class ConfigModel(BaseModel):
     hsl_api_url: str
     hsl_api_key: str
@@ -109,6 +147,10 @@ class ConfigModel(BaseModel):
     # saved layout is kept, so a settings save can't revert layout edits.
     layout: LayoutModel | None = None
     weather: WeatherModel | None = None
+    # Omitted screen/prices keep what is stored. The price layout has its own
+    # writer (PUT /api/layout/prices) and is never part of a settings save.
+    screen: Literal["transit", "prices"] | None = None
+    prices: PricesModel | None = None
 
 
 # =============================================================================
@@ -121,6 +163,14 @@ def generate_preview() -> bytes:
 
     # Weather is cached, so this is fast on subsequent calls
     weather = current_weather(config.weather)
+
+    if config.screen == SCREEN_PRICES:
+        view = build_view(current_prices(config.prices), config.prices, datetime.now(timezone.utc))
+        with _preview_lock:
+            renderer = DisplayRenderer.from_config(epd_mock.EPD(), config)
+            image_bw, image_red = renderer.render_prices(view, weather=weather)
+            renderer.write_to_screen(image_bw, image_red)
+            return PREVIEW_FILE.read_bytes()
 
     hsl_client = HSLClient(config.hsl_api_url, config.hsl_api_key)
     stop_ids = [s.id for s in config.stops]
@@ -151,10 +201,11 @@ def get_config():
 @app.post("/api/config")
 def update_config(config: ConfigModel):
     """Update configuration."""
+    stored = load_config()
     if config.layout is not None:
         layout = LayoutConfig.from_dict(config.layout.model_dump())
     else:
-        layout = load_config().layout
+        layout = stored.layout
     weather = WeatherConfig(**config.weather.model_dump()) if config.weather else WeatherConfig()
     config_data = ConfigData(
         hsl_api_url=config.hsl_api_url,
@@ -169,8 +220,14 @@ def update_config(config: ConfigModel):
         display=DisplaySettings(**config.display.model_dump()),
         layout=layout,
         weather=weather,
+        screen=config.screen or stored.screen,
+        prices=PricesConfig(**config.prices.model_dump()) if config.prices else stored.prices,
+        price_layout=stored.price_layout,
     )
     save_config(config_data)
+    # Switch the panel now rather than at the end of its current sleep.
+    if config_data.screen != stored.screen:
+        _touch_refresh_trigger()
     return {"status": "ok", "message": "Configuration saved"}
 
 @app.get("/api/preview")
@@ -195,20 +252,23 @@ def refresh_display():
     generate_preview()
 
     # Create trigger file to signal display.py to refresh the physical screen
+    return {
+        "status": "ok",
+        "message": "Display refreshed",
+        "physical_display_triggered": _touch_refresh_trigger()
+    }
+
+
+def _touch_refresh_trigger() -> bool:
+    """Ask the display loop to redraw now; True when the trigger was written."""
     try:
         os.makedirs(TRIGGER_DIR, exist_ok=True)
         with open(REFRESH_TRIGGER_FILE, 'w') as f:
             f.write('refresh')
-        physical_triggered = True
+        return True
     except Exception as e:
         print(f"Could not create trigger file: {e}")
-        physical_triggered = False
-
-    return {
-        "status": "ok",
-        "message": "Display refreshed",
-        "physical_display_triggered": physical_triggered
-    }
+        return False
 
 @app.get("/api/health")
 def health_check():
@@ -244,6 +304,49 @@ def get_weather():
         "temperature": data.temperature,
         "description": data.description,
         "location": data.location,
+    }
+
+
+@app.get("/api/prices")
+def get_prices():
+    """Spot prices for the dashboard, in c/kWh with VAT as the screen shows them."""
+    config = load_config()
+    data = current_prices(config.prices)
+    view = build_view(data, config.prices, datetime.now(timezone.utc))
+    if data is None or not view.has_data:
+        raise HTTPException(status_code=503, detail="Spot prices unavailable")
+
+    vat = config.prices.vat_percent
+
+    def iso(t: datetime) -> str:
+        return t.astimezone(HELSINKI).isoformat()
+
+    def stats(s):
+        if s is None:
+            return None
+        return {"min": s.min_price, "min_at": iso(s.min_start), "avg": s.avg_price,
+                "max": s.max_price, "max_at": iso(s.max_start)}
+
+    today = view.now.date()
+    return {
+        "current": None if view.current is None else {
+            "start": iso(view.current.start), "end": iso(view.current.end), "price": view.current_price,
+        },
+        "today": stats(view.today),
+        "tomorrow": stats(view.tomorrow),
+        "cheapest": None if view.cheapest is None else {
+            "hours": config.prices.cheapest_window_hours,
+            "start": iso(view.cheapest.start), "end": iso(view.cheapest.end), "avg": view.cheapest.avg_price,
+        },
+        # Today and tomorrow, for the dashboard
+        "points": [
+            {"start": iso(s.start), "price": s.c_kwh(vat)}
+            for s in data.slots if s.start.astimezone(HELSINKI).date() >= today
+        ],
+        "cheap_threshold": config.prices.cheap_threshold,
+        "expensive_threshold": config.prices.expensive_threshold,
+        "fetched_at": datetime.fromtimestamp(data.fetched_at, tz=timezone.utc).isoformat(),
+        "stale": view.stale,
     }
 
 
@@ -387,6 +490,21 @@ def update_layout(layout: LayoutModel):
     config.layout = LayoutConfig.from_dict(layout.model_dump())
     save_config(config)
     return {"status": "ok", "message": "Layout saved"}
+
+
+@app.get("/api/layout/prices")
+def get_price_layout():
+    """Get the spot-price screen's layout."""
+    return load_config().price_layout.to_dict()
+
+
+@app.put("/api/layout/prices")
+def update_price_layout(layout: PriceLayoutModel):
+    """Update the spot-price screen's layout; the only writer of price_layout."""
+    config = load_config()
+    config.price_layout = PriceLayoutConfig.from_dict(layout.model_dump())
+    save_config(config)
+    return {"status": "ok", "message": "Price layout saved"}
 
 
 if __name__ == "__main__":
