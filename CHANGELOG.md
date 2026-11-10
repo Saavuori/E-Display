@@ -38,6 +38,9 @@ conventional-commit prefixes in the pushed commits. See
 - The backend image builds again. The Python 3.14 base image had broken every
   backend release since August (Pillow 10.2.0 has no 3.14 wheel); the image is
   back on Python 3.11, the version CI tests and the lockfile targets.
+  Dependabot no longer proposes Python minor-version bumps for the image: two
+  auto-merged ones (to 3.14, then 3.15) had broken it again, which left the
+  display on v0.0.24 since September.
 - Departures around midnight: times are now computed from HSL's service day,
   so after-midnight trips no longer vanish, sort last, or show as "24:10".
 - Saving settings in the web UI no longer reverts layout-editor changes made

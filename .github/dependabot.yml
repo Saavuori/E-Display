@@ -68,6 +68,11 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: [version-update:semver-major]
+      # The backend's Python must match .python-version, CI and uv.lock, and
+      # Pillow 10.2.0 has no wheel past 3.12. Auto-merged bumps to 3.14 and
+      # 3.15 broke every backend image build, so move it by hand together.
+      - dependency-name: python
+        update-types: [version-update:semver-minor]
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
